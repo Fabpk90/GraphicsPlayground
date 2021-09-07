@@ -1,0 +1,70 @@
+//
+// Created by FanyMontpell on 03/09/2021.
+//
+
+#ifndef GRAPHICSPLAYGROUND_ENGINE_H
+#define GRAPHICSPLAYGROUND_ENGINE_H
+
+#include <windows.h>
+#include <diligent/include/Graphics/GraphicsEngine/interface/GraphicsTypes.h>
+#include <diligent/include/Graphics/GraphicsEngine/interface/RenderDevice.h>
+#include <diligent/include/Graphics/GraphicsEngine/interface/DeviceContext.h>
+#include <diligent/include/Graphics/GraphicsEngine/interface/SwapChain.h>
+#include <diligent/include/Graphics/GraphicsEngine/interface/PipelineState.h>
+#include <diligent/include/Common/interface/RefCntAutoPtr.hpp>
+#include <diligent/include/Common/interface/BasicMath.hpp>
+#include "Mesh.h"
+
+using namespace Diligent;
+
+class Engine {
+
+public:
+    Engine()
+    {
+        instance = this;
+    };
+    ~Engine()
+    {
+        m_immediateContext->Flush();
+    }
+
+    Engine(Engine&&) = delete;
+    Engine(Engine&) = delete;
+
+    static Engine* instance;
+
+public:
+    static RENDER_DEVICE_TYPE constexpr getRenderType() { return Diligent::RENDER_DEVICE_TYPE_VULKAN;}
+    void windowResize(int _width, int _height)
+    {
+        m_width = _width; m_height = _height;
+        //m_immediateContext->SetViewports(1, nullptr, m_width, m_height);
+    }
+    bool initializeDiligentEngine(HWND hwnd);
+    void createResources();
+
+    void render();
+    void present();
+
+    RefCntAutoPtr<IRenderDevice>& getDevice() {return m_device;}
+
+private:
+    int m_width, m_height;
+    RefCntAutoPtr<IRenderDevice>  m_device;
+    RefCntAutoPtr<IDeviceContext> m_immediateContext;
+    RefCntAutoPtr<ISwapChain>     m_swapChain;
+    RefCntAutoPtr<IPipelineState> m_PSO;
+    RefCntAutoPtr<IBuffer> m_cbBuffer;
+
+    RefCntAutoPtr<IShaderResourceBinding> m_SRB;
+
+    float4x4 m_worldview;
+    RefCntAutoPtr<IBuffer> m_meshVertexBuffer;
+    RefCntAutoPtr<IBuffer> m_meshIndexBuffer;
+
+    Mesh* m_mesh;
+};
+
+
+#endif //GRAPHICSPLAYGROUND_ENGINE_H
