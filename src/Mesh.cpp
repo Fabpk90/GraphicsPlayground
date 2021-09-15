@@ -91,7 +91,7 @@ Mesh::Group Mesh::loadGroupFrom(const aiMesh& mesh, const aiScene *pScene)
 
         for(int typeID = 1; typeID < aiTextureType_UNKNOWN; ++typeID)
         {
-            aiTextureType type = static_cast<aiTextureType>(typeID);
+            auto type = static_cast<aiTextureType>(typeID);
 
             for (int i = 0; i < mat->GetTextureCount(type); ++i)
             {
@@ -99,43 +99,53 @@ Mesh::Group Mesh::loadGroupFrom(const aiMesh& mesh, const aiScene *pScene)
 
                 if(mat->GetTexture(type, i, &texPath) == aiReturn_SUCCESS)
                 {
-                    RefCntAutoPtr<ITexture> tex;
-                    std::string pathToTex = m_path + texPath.C_Str();
-
-                    int width, height, nrChannels;
-                    unsigned char *data = stbi_load(pathToTex.c_str(), &width, &height, &nrChannels, 0);
-
-                    if(data)
-                    {
-                        TextureDesc texDesc;
-                        texDesc.Name = texPath.C_Str();
-                        texDesc.Width = width;
-                        texDesc.Height = height;
-                        texDesc.Type = Diligent::RESOURCE_DIM_TEX_2D;
-                        texDesc.BindFlags = Diligent::BIND_SHADER_RESOURCE;
-                        texDesc.Usage = Diligent::USAGE_IMMUTABLE;
-                        texDesc.Format = Diligent::TEX_FORMAT_RGB32_UINT;
-
-                        TextureSubResData resData;
-                        resData.pData = data;
-
-                        TextureData initData;
-                        initData.pSubResources = &resData;
-                        initData.NumSubresources = 1;
-
-                        Engine::instance->getDevice()->CreateTexture(texDesc, &initData, &tex);
-
-                        group.m_textures.emplace_back(tex);
-
-                        std::cout << "Creating " << texPath.C_Str() << " Tex" << std::endl;
-                    }
-
-
-                    stbi_image_free(data);
+                    std::string str = texPath.C_Str();
+                    addTexture(str, group);
                 }
             }
         }
     }
 
     return group;
+}
+
+void Mesh::addTexture(std::string& _path, Group& _group)
+{
+    RefCntAutoPtr<ITexture> tex;
+    std::string pathToTex = m_path + _path;
+
+    int width, height, nrChannels;
+    unsigned char *data = stbi_load(pathToTex.c_str(), &width, &height, &nrChannels, 0);
+
+    if(data)
+    {
+        TextureDesc texDesc;
+        texDesc.Name = _path.c_str();
+        texDesc.Width = width;
+        texDesc.Height = height;
+        texDesc.Type = Diligent::RESOURCE_DIM_TEX_2D;
+        texDesc.BindFlags = Diligent::BIND_SHADER_RESOURCE;
+        texDesc.Usage = Diligent::USAGE_IMMUTABLE;
+        texDesc.Format = Diligent::TEX_FORMAT_RGBA8_UNORM_SRGB;
+
+        TextureSubResData resData;
+        resData.pData = data;
+
+        TextureData initData;
+        initData.pSubResources = &resData;
+        initData.NumSubresources = 1;
+
+        Engine::instance->getDevice()->CreateTexture(texDesc, &initData, &tex);
+
+        _group.m_textures.emplace_back(tex);
+
+        std::cout << "Creating " << _path << " Tex" << std::endl;
+    }
+
+    stbi_image_free(data);
+}
+
+void Mesh::addTexture(std::string &_path, int index)
+{
+    addTexture(_path, m_meshes[index]);
 }

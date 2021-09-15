@@ -25,8 +25,22 @@ using namespace Diligent;
 
 std::unique_ptr<Engine> engine;
 
+struct WindowMessageData
+{
+    HWND   hWnd;
+    UINT   message;
+    WPARAM wParam;
+    LPARAM lParam;
+};
+
 // Called every time the NativeNativeAppBase receives a message
-LRESULT CALLBACK MessageProc(HWND wnd, UINT message, WPARAM wParam, LPARAM lParam) {
+LRESULT CALLBACK MessageProc(HWND wnd, UINT message, WPARAM wParam, LPARAM lParam)
+{
+    WindowMessageData data{wnd, message, wParam, lParam};
+
+    if(engine)
+        engine->m_inputController.HandleNativeMessage(static_cast<WindowMessageData*>(&data));
+
     switch (message) {
         case WM_PAINT: {
             PAINTSTRUCT ps;

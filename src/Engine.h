@@ -14,6 +14,7 @@
 #include <diligent/include/Common/interface/RefCntAutoPtr.hpp>
 #include <diligent/include/Common/interface/BasicMath.hpp>
 #include "Mesh.h"
+#include "FirstPersonCamera.hpp"
 
 using namespace Diligent;
 
@@ -39,7 +40,8 @@ public:
     void windowResize(int _width, int _height)
     {
         m_width = _width; m_height = _height;
-        //m_immediateContext->SetViewports(1, nullptr, m_width, m_height);
+        if(m_immediateContext)
+            m_immediateContext->SetViewports(1, nullptr, m_width, m_height);
     }
     bool initializeDiligentEngine(HWND hwnd);
     void createResources();
@@ -49,13 +51,21 @@ public:
 
     RefCntAutoPtr<IRenderDevice>& getDevice() {return m_device;}
 
+public:
+    InputControllerWin32 m_inputController;
+
 private:
     int m_width, m_height;
+
+    IEngineFactory*               m_engineFactory  = nullptr;
+
     RefCntAutoPtr<IRenderDevice>  m_device;
     RefCntAutoPtr<IDeviceContext> m_immediateContext;
     RefCntAutoPtr<ISwapChain>     m_swapChain;
-    RefCntAutoPtr<IPipelineState> m_PSO;
-    RefCntAutoPtr<IBuffer> m_cbBuffer;
+    RefCntAutoPtr<IPipelineState> m_PSOGBuffer;
+    RefCntAutoPtr<IPipelineState> m_PSOShowGBuffer;
+    RefCntAutoPtr<IPipelineState> m_PSOFinal;
+    RefCntAutoPtr<IBuffer>        m_cbBuffer;
 
     RefCntAutoPtr<IShaderResourceBinding> m_SRB;
 
@@ -64,6 +74,8 @@ private:
     RefCntAutoPtr<IBuffer> m_meshIndexBuffer;
 
     Mesh* m_mesh;
+    FirstPersonCamera m_camera;
+
 };
 
 

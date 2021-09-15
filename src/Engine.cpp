@@ -19,55 +19,8 @@
 #include "Engine.h"
 #include "Mesh.h"
 
-static const char* VSSource = R"(
-Texture2D    g_Texture;
-SamplerState g_Texture_sampler;
-
-struct PSInput
-{
-    float4 Pos : ATTRIB0;
-    float2 UV : ATTRIB1;
-};
-
-struct PSOutput
-{
-    float4 Color : SV_TARGET;
-};
-
-void main(in  PSInput  PSIn,
-          out PSOutput PSOut)
-{
-    PSOut.Color = g_Texture.Sample(g_Texture_sampler, PSIn.UV);
-}
-)";
-
-// Pixel shader simply outputs interpolated vertex color
 static const char* PSSource = R"(
-cbuffer Constants
-{
-    float4x4 g_WorldViewProj;
-};
 
-struct VSInput
-{
-    float3 Pos : ATTRIB0;
-    float3 Normal : ATTRIB1;
-    float2 UV  : ATTRIB2;
-};
-
-struct PSInput
-{
-    float4 Pos : SV_POSITION;
-    float3 Normal : NORMAL;
-    float2 UV  : TEX_COORD;
-};
-
-void main(in  VSInput VSIn,
-          out PSInput PSIn)
-{
-    PSIn.Pos = mul( float4(VSIn.Pos,1.0), g_WorldViewProj);
-    PSIn.UV  = VSIn.UV;
-}
 )";
 
 Engine* Engine::instance = nullptr;
@@ -88,6 +41,9 @@ bool Engine::initializeDiligentEngine(HWND hWnd)
 
             auto* pFactoryD3D12 = GetEngineFactoryD3D12();
             pFactoryD3D12->CreateDeviceAndContextsD3D12(EngineCI, &m_device, &m_immediateContext);
+
+            m_engineFactory = pFactoryD3D12;
+
             Win32NativeWindow Window{hWnd};
             pFactoryD3D12->CreateSwapChainD3D12(m_device, m_immediateContext, SCDesc, FullScreenModeDesc{}, Window, &m_swapChain);
         }
@@ -103,6 +59,8 @@ bool Engine::initializeDiligentEngine(HWND hWnd)
 
             auto* pFactoryVk = GetEngineFactoryVk();
             pFactoryVk->CreateDeviceAndContextsVk(EngineCI, &m_device, &m_immediateContext);
+
+            m_engineFactory = pFactoryVk;
 
             if (!m_swapChain && hWnd != nullptr)
             {
@@ -129,7 +87,7 @@ void Engine::createResources()
 
     // Pipeline state name is used by the engine to report issues.
     // It is always a good idea to give objects descriptive names.
-    PSOCreateInfo.PSODesc.Name = "Simple triangle PSO";
+    PSOCreateInfo.PSODesc.Name = "Simple Mesh PSO";
 
     // This is a graphics pipeline
     PSOCreateInfo.PSODesc.PipelineType = PIPELINE_TYPE_GRAPHICS;
@@ -162,27 +120,32 @@ void Engine::createResources()
             LayoutElement (2, 0, 2, VT_FLOAT32)
     };
     m_mesh = new Mesh("mesh/Cerberus/Cerberus_LP.fbx");
+    //m_mesh->addTexture("Textures/Cerberus_M.tga", 0);
+   // m_mesh->addTexture("Textures/Cerberus_N.tga", 0);
+    //m_mesh->addTexture("Textures/Cerberus_R.tga", 0);
 
     PSOCreateInfo.GraphicsPipeline.InputLayout.LayoutElements = layoutElements;
     PSOCreateInfo.GraphicsPipeline.InputLayout.NumElements = _countof(layoutElements);
 
     BufferDesc VertBuffDesc;
-    VertBuffDesc.Name          = "Cube vertex buffer";
+    VertBuffDesc.Name          = "Mesh vertex buffer";
     VertBuffDesc.Usage         = USAGE_IMMUTABLE;
     VertBuffDesc.BindFlags     = BIND_VERTEX_BUFFER;
-    VertBuffDesc.uiSizeInBytes          = sizeof(Vertex);
+    VertBuffDesc.uiSizeInBytes          = m_mesh->getGroup().m_vertices.size() * sizeof(Vertex);
     BufferData VBData;
     VBData.pData    = m_mesh->getGroup().m_vertices.data();
-    VBData.DataSize = m_mesh->getGroup().m_vertices.size();// AVOID THIS PLEEEASE
+    VBData.DataSize = m_mesh->getGroup().m_vertices.size() * sizeof (Vertex);// AVOID THIS PLEEEASE
+
+    m_device->CreateBuffer(VertBuffDesc, &VBData, &m_meshVertexBuffer);
 
     BufferDesc IndexBuffDesc;
-    IndexBuffDesc.Name          = "Cube vertex buffer";
+    IndexBuffDesc.Name          = "Mesh vertex buffer";
     IndexBuffDesc.Usage         = USAGE_IMMUTABLE;
     IndexBuffDesc.BindFlags     = BIND_INDEX_BUFFER;
-    IndexBuffDesc.uiSizeInBytes          = sizeof(uint);
+    IndexBuffDesc.uiSizeInBytes          =  m_mesh->getGroup().m_indices.size() * sizeof(uint);
     BufferData IBData;
     IBData.pData    = m_mesh->getGroup().m_indices.data();
-    IBData.DataSize = m_mesh->getGroup().m_indices.size();// AVOID THIS PLEEEASE
+    IBData.DataSize = m_mesh->getGroup().m_indices.size() * sizeof (uint);// AVOID THIS PLEEEASE
 
     m_device->CreateBuffer(IndexBuffDesc, &IBData, &m_meshIndexBuffer);
 
@@ -207,6 +170,11 @@ void Engine::createResources()
     PSOCreateInfo.PSODesc.ResourceLayout.NumImmutableSamplers = _countof(ImtblSamplers);
 
     ShaderCreateInfo ShaderCI;
+
+    RefCntAutoPtr<IShaderSourceInputStreamFactory> pShaderSourceFactory;
+    m_engineFactory->CreateDefaultShaderSourceStreamFactory("shader/", &pShaderSourceFactory);
+    ShaderCI.pShaderSourceStreamFactory = pShaderSourceFactory;
+
     // Tell the system that the shader source code is in HLSL.
     // For OpenGL, the engine will convert this into GLSL under the hood
     ShaderCI.SourceLanguage = SHADER_SOURCE_LANGUAGE_HLSL;
@@ -218,7 +186,7 @@ void Engine::createResources()
         ShaderCI.Desc.ShaderType = SHADER_TYPE_VERTEX;
         ShaderCI.EntryPoint      = "main";
         ShaderCI.Desc.Name       = "Mesh vertex shader";
-        ShaderCI.Source          = VSSource;
+        ShaderCI.FilePath        = "gbuffer/vs.hlsl";
         m_device->CreateShader(ShaderCI, &pVS);
     }
 
@@ -228,28 +196,35 @@ void Engine::createResources()
         ShaderCI.Desc.ShaderType = SHADER_TYPE_PIXEL;
         ShaderCI.EntryPoint      = "main";
         ShaderCI.Desc.Name       = "Mesh pixel shader";
-        ShaderCI.Source          = PSSource;
+        ShaderCI.FilePath        = "gbuffer/ps.hlsl";
         m_device->CreateShader(ShaderCI, &pPS);
     }
 
     // Finally, create the pipeline state
     PSOCreateInfo.pVS = pVS;
     PSOCreateInfo.pPS = pPS;
-    m_device->CreateGraphicsPipelineState(PSOCreateInfo, &m_PSO);
+    m_device->CreateGraphicsPipelineState(PSOCreateInfo, &m_PSOFinal);
 
-    m_PSO->CreateShaderResourceBinding(&m_SRB, true);
+    m_PSOFinal->GetStaticVariableByName(SHADER_TYPE_VERTEX, "Constants")->Set(m_cbBuffer);
+
+    m_PSOFinal->CreateShaderResourceBinding(&m_SRB, true);
+
     m_SRB->GetVariableByName(SHADER_TYPE_PIXEL, "g_Texture")->
-    Set(dynamic_cast<ITexture*>(m_mesh->getGroup().m_textures[0]->GetUserData())->GetDefaultView(TEXTURE_VIEW_SHADER_RESOURCE));
+    Set(m_mesh->getGroup().m_textures[0]->GetDefaultView(TEXTURE_VIEW_SHADER_RESOURCE));
+
+    m_worldview = float4x4::Translation(0, 0, -20);
+    m_camera.SetProjAttribs(0.01f, 1000, (float)m_width / (float) m_height, 45.0f, Diligent::SURFACE_TRANSFORM_OPTIMAL, false);
 }
 
 void Engine::render()
 {
+    m_camera.Update(m_inputController, 0.16f);
+
     {
         // Map the buffer and write current world-view-projection matrix
         MapHelper<float4x4> CBConstants(m_immediateContext, m_cbBuffer, MAP_WRITE, MAP_FLAG_DISCARD);
-        *CBConstants = (m_worldview);
+        *CBConstants = (m_worldview * m_camera.GetViewMatrix() * m_camera.GetProjMatrix()).Transpose();
     }
-
 
     // Set render targets before issuing any draw command.
     // Note that Present() unbinds the back buffer if it is set as render target.
@@ -258,13 +233,12 @@ void Engine::render()
     m_immediateContext->SetRenderTargets(1, &pRTV, pDSV, RESOURCE_STATE_TRANSITION_MODE_TRANSITION);
 
     // Clear the back buffer
-    const float ClearColor[] = {0.350f, 0.350f, 0.350f, 1.0f};
+    const float ClearColor[] = {1.0, 1.0, 1.0, 1.0f};
     // Let the engine perform required state transitions
     m_immediateContext->ClearRenderTarget(pRTV, ClearColor, RESOURCE_STATE_TRANSITION_MODE_TRANSITION);
     m_immediateContext->ClearDepthStencil(pDSV, CLEAR_DEPTH_FLAG, 1.f, 0, RESOURCE_STATE_TRANSITION_MODE_TRANSITION);
 
-    // Set the pipeline state in the immediate context
-    m_immediateContext->SetPipelineState(m_PSO);
+
 
     Uint32   offset   = 0;
     IBuffer* pBuffs[] = {m_meshVertexBuffer};
@@ -272,11 +246,9 @@ void Engine::render()
                                           SET_VERTEX_BUFFERS_FLAG_RESET);
     m_immediateContext->SetIndexBuffer(m_meshIndexBuffer, 0, RESOURCE_STATE_TRANSITION_MODE_TRANSITION);
 
+    m_immediateContext->SetPipelineState(m_PSOFinal);
     m_immediateContext->CommitShaderResources(m_SRB, RESOURCE_STATE_TRANSITION_MODE_TRANSITION);
 
-
-    // Typically we should now call CommitShaderResources(), however shaders in this example don't
-    // use any resources.
 
     DrawIndexedAttribs DrawAttrs; // This is an indexed draw call
     DrawAttrs.IndexType  = VT_UINT32; // Index type

@@ -32,7 +32,15 @@ class Mesh {
 public:
     Mesh(const char* _path, float3 _position = float3(0), float3 _scale = float3(1));
 
-    const Group& getGroup() { return m_meshes[0];}
+    Group& getGroup() { return m_meshes[0];}
+
+    void addTexture(const char* _path, int index)
+    {
+        std::string str = _path;
+        addTexture(str, index);
+    }
+    void addTexture(std::string& _path, Group& _group);
+    void addTexture(std::string& _path, int index);
 
 private:
     float4x4 m_model;
