@@ -17,11 +17,6 @@
 #include <diligent/include/Graphics/GraphicsTools/interface/MapHelper.hpp>
 
 #include "Engine.h"
-#include "Mesh.h"
-
-static const char* PSSource = R"(
-
-)";
 
 Engine* Engine::instance = nullptr;
 
@@ -30,7 +25,6 @@ bool Engine::initializeDiligentEngine(HWND hWnd)
     SwapChainDesc SCDesc;
     switch (getRenderType())
     {
-
         case RENDER_DEVICE_TYPE_D3D12:
         {
 #    if ENGINE_DLL
@@ -94,65 +88,38 @@ void Engine::createResources()
 
     // clang-format off
     // This tutorial will render to a single render target
-    PSOCreateInfo.GraphicsPipeline.NumRenderTargets             = 1;
+    PSOCreateInfo.GraphicsPipeline.NumRenderTargets             = 2;
     // Set render target format which is the format of the swap chain's color buffer
     PSOCreateInfo.GraphicsPipeline.RTVFormats[0]                = m_swapChain->GetDesc().ColorBufferFormat;
+    PSOCreateInfo.GraphicsPipeline.RTVFormats[1]                = TEX_FORMAT_RGBA8_UNORM;
     // Use the depth buffer format from the swap chain
     PSOCreateInfo.GraphicsPipeline.DSVFormat                    = m_swapChain->GetDesc().DepthBufferFormat;
     // Primitive topology defines what kind of primitives will be rendered by this pipeline state
     PSOCreateInfo.GraphicsPipeline.PrimitiveTopology            = PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
     // No back face culling for this tutorial
-    PSOCreateInfo.GraphicsPipeline.RasterizerDesc.CullMode      = Diligent::CULL_MODE_BACK;
+    PSOCreateInfo.GraphicsPipeline.RasterizerDesc.CullMode      = CULL_MODE_BACK;
     // Disable depth testing
     PSOCreateInfo.GraphicsPipeline.DepthStencilDesc.DepthEnable = True;
     // clang-format on
-
-    BufferDesc cbDesc;
-    cbDesc.Usage = Diligent::USAGE_DYNAMIC;
-    cbDesc.BindFlags = Diligent::BIND_UNIFORM_BUFFER;
-    cbDesc.CPUAccessFlags = Diligent::CPU_ACCESS_WRITE;
-    cbDesc.uiSizeInBytes = sizeof(float4x4);
-    m_device->CreateBuffer(cbDesc, nullptr, &m_cbBuffer);
 
     LayoutElement layoutElements[] = {
             LayoutElement(0, 0, 3, VT_FLOAT32),
             LayoutElement (1, 0, 3, VT_FLOAT32),
             LayoutElement (2, 0, 2, VT_FLOAT32)
     };
-    m_mesh = new Mesh("mesh/Cerberus/Cerberus_LP.fbx");
-    //m_mesh->addTexture("Textures/Cerberus_M.tga", 0);
-   // m_mesh->addTexture("Textures/Cerberus_N.tga", 0);
+    m_mesh = new Mesh("mesh/sponza/sponza.obj");
+    //m_mesh->addTexture("textures/Cerberus_M.tga", 0);
+    //m_mesh->addTexture("Textures/Cerberus_N.tga", 0);
     //m_mesh->addTexture("Textures/Cerberus_R.tga", 0);
 
     PSOCreateInfo.GraphicsPipeline.InputLayout.LayoutElements = layoutElements;
     PSOCreateInfo.GraphicsPipeline.InputLayout.NumElements = _countof(layoutElements);
 
-    BufferDesc VertBuffDesc;
-    VertBuffDesc.Name          = "Mesh vertex buffer";
-    VertBuffDesc.Usage         = USAGE_IMMUTABLE;
-    VertBuffDesc.BindFlags     = BIND_VERTEX_BUFFER;
-    VertBuffDesc.uiSizeInBytes          = m_mesh->getGroup().m_vertices.size() * sizeof(Vertex);
-    BufferData VBData;
-    VBData.pData    = m_mesh->getGroup().m_vertices.data();
-    VBData.DataSize = m_mesh->getGroup().m_vertices.size() * sizeof (Vertex);// AVOID THIS PLEEEASE
-
-    m_device->CreateBuffer(VertBuffDesc, &VBData, &m_meshVertexBuffer);
-
-    BufferDesc IndexBuffDesc;
-    IndexBuffDesc.Name          = "Mesh vertex buffer";
-    IndexBuffDesc.Usage         = USAGE_IMMUTABLE;
-    IndexBuffDesc.BindFlags     = BIND_INDEX_BUFFER;
-    IndexBuffDesc.uiSizeInBytes          =  m_mesh->getGroup().m_indices.size() * sizeof(uint);
-    BufferData IBData;
-    IBData.pData    = m_mesh->getGroup().m_indices.data();
-    IBData.DataSize = m_mesh->getGroup().m_indices.size() * sizeof (uint);// AVOID THIS PLEEEASE
-
-    m_device->CreateBuffer(IndexBuffDesc, &IBData, &m_meshIndexBuffer);
-
 
     ShaderResourceVariableDesc Vars[] =
     {
-            {SHADER_TYPE_PIXEL, "g_Texture", SHADER_RESOURCE_VARIABLE_TYPE_MUTABLE}
+            {SHADER_TYPE_PIXEL, "g_TextureAlbedo", SHADER_RESOURCE_VARIABLE_TYPE_DYNAMIC},
+            {SHADER_TYPE_PIXEL, "g_TextureNormal", SHADER_RESOURCE_VARIABLE_TYPE_DYNAMIC}
     };
     PSOCreateInfo.PSODesc.ResourceLayout.Variables    = Vars;
     PSOCreateInfo.PSODesc.ResourceLayout.NumVariables = _countof(Vars);
@@ -164,7 +131,8 @@ void Engine::createResources()
     };
     ImmutableSamplerDesc ImtblSamplers[] =
     {
-            {SHADER_TYPE_PIXEL, "g_Texture", SamLinearClampDesc}
+            {SHADER_TYPE_PIXEL, "g_TextureAlbedo", SamLinearClampDesc},
+            {SHADER_TYPE_PIXEL, "g_TextureNormal", SamLinearClampDesc}
     };
     PSOCreateInfo.PSODesc.ResourceLayout.ImmutableSamplers    = ImtblSamplers;
     PSOCreateInfo.PSODesc.ResourceLayout.NumImmutableSamplers = _countof(ImtblSamplers);
@@ -205,14 +173,25 @@ void Engine::createResources()
     PSOCreateInfo.pPS = pPS;
     m_device->CreateGraphicsPipelineState(PSOCreateInfo, &m_PSOFinal);
 
-    m_PSOFinal->GetStaticVariableByName(SHADER_TYPE_VERTEX, "Constants")->Set(m_cbBuffer);
+    m_PSOFinal->GetStaticVariableByName(SHADER_TYPE_VERTEX, "Constants")->Set(m_mesh->getCB());
 
     m_PSOFinal->CreateShaderResourceBinding(&m_SRB, true);
 
-    m_SRB->GetVariableByName(SHADER_TYPE_PIXEL, "g_Texture")->
-    Set(m_mesh->getGroup().m_textures[0]->GetDefaultView(TEXTURE_VIEW_SHADER_RESOURCE));
+    TextureDesc desc;
+    desc.Format = TEX_FORMAT_RGBA8_UNORM;
+    desc.Width = m_width;
+    desc.Height = m_height;
+    desc.Type = Diligent::RESOURCE_DIM_TEX_2D;
+    desc.BindFlags = Diligent::BIND_RENDER_TARGET;
 
-    m_worldview = float4x4::Translation(0, 0, -20);
+    m_device->CreateTexture(desc, nullptr, &m_gbufferNormal);
+
+    //ugly hack, this version of diligent doesn't include this strange, look into it later
+    m_imguiRenderer = new ImGuiImplDiligent(m_device, m_swapChain->GetDesc().ColorBufferFormat, m_swapChain->GetDesc().DepthBufferFormat);
+    m_imguiRenderer->CreateDeviceObjects();
+    m_imguiRenderer->UpdateFontsTexture();
+
+    m_camera.SetPos(float3(0, 0, -20));
     m_camera.SetProjAttribs(0.01f, 1000, (float)m_width / (float) m_height, 45.0f, Diligent::SURFACE_TRANSFORM_OPTIMAL, false);
 }
 
@@ -220,43 +199,27 @@ void Engine::render()
 {
     m_camera.Update(m_inputController, 0.16f);
 
-    {
-        // Map the buffer and write current world-view-projection matrix
-        MapHelper<float4x4> CBConstants(m_immediateContext, m_cbBuffer, MAP_WRITE, MAP_FLAG_DISCARD);
-        *CBConstants = (m_worldview * m_camera.GetViewMatrix() * m_camera.GetProjMatrix()).Transpose();
-    }
+    //m_imguiRenderer->NewFrame(m_width, m_height, Diligent::SURFACE_TRANSFORM_OPTIMAL);
+       // ImGui::Text("%f %f %f", m_camera.GetPos().x, m_camera.GetPos().y, m_camera.GetPos().z);
+   // m_imguiRenderer->EndFrame();
 
     // Set render targets before issuing any draw command.
     // Note that Present() unbinds the back buffer if it is set as render target.
-    auto* pRTV = m_swapChain->GetCurrentBackBufferRTV();
+    ITextureView* pRTV[] = {m_swapChain->GetCurrentBackBufferRTV(), m_gbufferNormal->GetDefaultView(Diligent::TEXTURE_VIEW_RENDER_TARGET)};
     auto* pDSV = m_swapChain->GetDepthBufferDSV();
-    m_immediateContext->SetRenderTargets(1, &pRTV, pDSV, RESOURCE_STATE_TRANSITION_MODE_TRANSITION);
-
-    // Clear the back buffer
-    const float ClearColor[] = {1.0, 1.0, 1.0, 1.0f};
-    // Let the engine perform required state transitions
-    m_immediateContext->ClearRenderTarget(pRTV, ClearColor, RESOURCE_STATE_TRANSITION_MODE_TRANSITION);
-    m_immediateContext->ClearDepthStencil(pDSV, CLEAR_DEPTH_FLAG, 1.f, 0, RESOURCE_STATE_TRANSITION_MODE_TRANSITION);
-
-
-
-    Uint32   offset   = 0;
-    IBuffer* pBuffs[] = {m_meshVertexBuffer};
-    m_immediateContext->SetVertexBuffers(0, 1, pBuffs, &offset, RESOURCE_STATE_TRANSITION_MODE_TRANSITION,
-                                          SET_VERTEX_BUFFERS_FLAG_RESET);
-    m_immediateContext->SetIndexBuffer(m_meshIndexBuffer, 0, RESOURCE_STATE_TRANSITION_MODE_TRANSITION);
+    m_immediateContext->SetRenderTargets(2, pRTV, pDSV, RESOURCE_STATE_TRANSITION_MODE_TRANSITION);
 
     m_immediateContext->SetPipelineState(m_PSOFinal);
-    m_immediateContext->CommitShaderResources(m_SRB, RESOURCE_STATE_TRANSITION_MODE_TRANSITION);
 
+    const float ClearColor[] = {0.0f, 181.f / 255.f, 221.f / 255.f, 1.0f};
+    // Let the engine perform required state transitions
+    m_immediateContext->ClearRenderTarget(pRTV[0], ClearColor, RESOURCE_STATE_TRANSITION_MODE_TRANSITION);
+    m_immediateContext->ClearDepthStencil(pDSV, CLEAR_DEPTH_FLAG, 1.f, 0, RESOURCE_STATE_TRANSITION_MODE_TRANSITION);
 
-    DrawIndexedAttribs DrawAttrs; // This is an indexed draw call
-    DrawAttrs.IndexType  = VT_UINT32; // Index type
-    DrawAttrs.NumIndices = m_mesh->getGroup().m_indices.size();
-    // Verify the state of vertex and index buffers as well as consistence of
-    // render targets and correctness of draw command arguments
-    DrawAttrs.Flags = DRAW_FLAG_VERIFY_ALL;
-    m_immediateContext->DrawIndexed(DrawAttrs);
+    m_mesh->draw(m_immediateContext, m_SRB, m_camera);
+
+   // m_imguiRenderer->Render(m_immediateContext);
+
 }
 
 void Engine::present()

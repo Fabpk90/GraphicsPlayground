@@ -13,6 +13,7 @@
 #include <diligent/include/Graphics/GraphicsEngine/interface/PipelineState.h>
 #include <diligent/include/Common/interface/RefCntAutoPtr.hpp>
 #include <diligent/include/Common/interface/BasicMath.hpp>
+#include <diligent/include/Imgui/interface/ImGuiImplDiligent.hpp>
 #include "Mesh.h"
 #include "FirstPersonCamera.hpp"
 
@@ -65,13 +66,12 @@ private:
     RefCntAutoPtr<IPipelineState> m_PSOGBuffer;
     RefCntAutoPtr<IPipelineState> m_PSOShowGBuffer;
     RefCntAutoPtr<IPipelineState> m_PSOFinal;
-    RefCntAutoPtr<IBuffer>        m_cbBuffer;
+
+    ImGuiImplDiligent* m_imguiRenderer;
+
+    RefCntAutoPtr<ITexture> m_gbufferNormal;
 
     RefCntAutoPtr<IShaderResourceBinding> m_SRB;
-
-    float4x4 m_worldview;
-    RefCntAutoPtr<IBuffer> m_meshVertexBuffer;
-    RefCntAutoPtr<IBuffer> m_meshIndexBuffer;
 
     Mesh* m_mesh;
     FirstPersonCamera m_camera;

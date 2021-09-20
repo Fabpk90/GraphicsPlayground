@@ -11,6 +11,8 @@
 #include <assimp/scene.h>
 #include <diligent/include/Graphics/GraphicsEngine/interface/Texture.h>
 #include <diligent/include/Common/interface/RefCntAutoPtr.hpp>
+#include <diligent/include/Graphics/GraphicsEngine/interface/ShaderResourceBinding.h>
+#include "FirstPersonCamera.hpp"
 
 using namespace Diligent;
 
@@ -27,6 +29,10 @@ class Mesh {
         std::vector<Vertex> m_vertices;
         std::vector<uint> m_indices;
         std::vector<RefCntAutoPtr<ITexture>> m_textures;
+
+        //This is not really optimal, as the data doesn't need to be both on CPU AND GPU
+        RefCntAutoPtr<IBuffer> m_meshVertexBuffer;
+        RefCntAutoPtr<IBuffer> m_meshIndexBuffer;
     };
 
 public:
@@ -42,14 +48,22 @@ public:
     void addTexture(std::string& _path, Group& _group);
     void addTexture(std::string& _path, int index);
 
+    void draw(RefCntAutoPtr<IDeviceContext> _context, RefCntAutoPtr<IShaderResourceBinding> _srb, FirstPersonCamera& _camera);
+
+    RefCntAutoPtr<IBuffer> getCB() { return m_cbBuffer; }
+
 private:
     float4x4 m_model;
     float3 m_position;
     float3 m_scale;
 
+    RefCntAutoPtr<IBuffer> m_cbBuffer;
+
     std::string m_path;
 
     std::vector<Group> m_meshes;
+
+    std::unordered_map<std::string, RefCntAutoPtr<ITexture>> m_texturesLoaded;
 
     void recursivelyLoadNode(aiNode *pNode, const aiScene *pScene);
 

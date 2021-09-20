@@ -53,8 +53,4 @@ void DILIGENT_GLOBAL_FUNCTION(CreateTextureFromFile)(const Char*               F
 
 #include "../../Primitives/interface/UndefGlobalFuncHelperMacros.h"
 
-//ADDED BY ME :)
-
-
-
 DILIGENT_END_NAMESPACE // namespace Diligent
