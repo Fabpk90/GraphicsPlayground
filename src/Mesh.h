@@ -12,6 +12,7 @@
 #include <diligent/include/Graphics/GraphicsEngine/interface/Texture.h>
 #include <diligent/include/Common/interface/RefCntAutoPtr.hpp>
 #include <diligent/include/Graphics/GraphicsEngine/interface/ShaderResourceBinding.h>
+#include <diligent/include/Graphics/GraphicsEngine/interface/RenderDevice.h>
 #include "FirstPersonCamera.hpp"
 
 using namespace Diligent;
@@ -36,7 +37,7 @@ class Mesh {
     };
 
 public:
-    Mesh(const char* _path, float3 _position = float3(0), float3 _scale = float3(1));
+    Mesh(RefCntAutoPtr<IRenderDevice> _device, const char* _path, float3 _position = float3(0), float3 _scale = float3(1));
 
     Group& getGroup() { return m_meshes[0];}
 
@@ -48,16 +49,17 @@ public:
     void addTexture(std::string& _path, Group& _group);
     void addTexture(std::string& _path, int index);
 
-    void draw(RefCntAutoPtr<IDeviceContext> _context, RefCntAutoPtr<IShaderResourceBinding> _srb, FirstPersonCamera& _camera);
+    void draw(RefCntAutoPtr<IDeviceContext> _context, RefCntAutoPtr<IShaderResourceBinding> _srb, FirstPersonCamera& _camera,
+              RefCntAutoPtr<IBuffer>& _bufferMatrices);
 
-    RefCntAutoPtr<IBuffer> getCB() { return m_cbBuffer; }
+    float4x4& getModel() { return m_model;}
 
 private:
     float4x4 m_model;
     float3 m_position;
     float3 m_scale;
 
-    RefCntAutoPtr<IBuffer> m_cbBuffer;
+    RefCntAutoPtr<IRenderDevice> m_device;
 
     std::string m_path;
 

@@ -82,6 +82,9 @@ InputKeys MapCameraKeyWnd(UINT nKey)
         case VK_SUBTRACT:
             return InputKeys::ZoomOut;
 
+        case 'R':
+            return InputKeys::R;
+
         default:
             return InputKeys::Unknown;
     }

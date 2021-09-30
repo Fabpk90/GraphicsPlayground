@@ -3,9 +3,7 @@
 //
 
 #include "Mesh.h"
-#include "Engine.h"
 #include <fstream>
-#include <assimp/scene.h>
 #include <assimp/Importer.hpp>
 #include <assimp/postprocess.h>
 #include <diligent/include/TextureLoader/interface/TextureLoader.h>
@@ -15,8 +13,8 @@
 
 using namespace Diligent;
 
-Mesh::Mesh(const char *_path, float3 _position, float3 _scale)
-: m_path(_path), m_position(_position), m_scale(_scale)
+Mesh::Mesh(RefCntAutoPtr<IRenderDevice> _device, const char *_path, float3 _position, float3 _scale)
+: m_path(_path), m_position(_position), m_scale(_scale), m_device(_device)
 {
     m_model = float4x4::Scale(m_scale) * float4x4::Translation(m_position);
 
@@ -25,7 +23,7 @@ Mesh::Mesh(const char *_path, float3 _position, float3 _scale)
 
     std::ifstream file(_path);
 
-    if(!file.bad())
+    if(file.good())
     {
         Assimp::Importer importer;
         const aiScene* scene = importer.ReadFile(_path, aiProcess_Triangulate | aiProcess_FlipUVs | aiProcess_GenNormals);
@@ -36,15 +34,6 @@ Mesh::Mesh(const char *_path, float3 _position, float3 _scale)
 
         importer.FreeScene();
     }
-
-    auto device = Engine::instance->getDevice();
-
-    BufferDesc cbDesc;
-    cbDesc.Usage = Diligent::USAGE_DYNAMIC;
-    cbDesc.BindFlags = Diligent::BIND_UNIFORM_BUFFER;
-    cbDesc.CPUAccessFlags = Diligent::CPU_ACCESS_WRITE;
-    cbDesc.uiSizeInBytes = sizeof(float4x4);
-    device->CreateBuffer(cbDesc, nullptr, &m_cbBuffer);
 
     for(Group& grp : m_meshes)
     {
@@ -57,7 +46,7 @@ Mesh::Mesh(const char *_path, float3 _position, float3 _scale)
         VBData.pData    = grp.m_vertices.data();
         VBData.DataSize = grp.m_vertices.size() * sizeof (Vertex);// AVOID THIS PLEEEASE
 
-        device->CreateBuffer(VertBuffDesc, &VBData, &grp.m_meshVertexBuffer);
+        m_device->CreateBuffer(VertBuffDesc, &VBData, &grp.m_meshVertexBuffer);
 
         BufferDesc IndexBuffDesc;
         IndexBuffDesc.Name          = "Mesh vertex buffer";
@@ -68,7 +57,7 @@ Mesh::Mesh(const char *_path, float3 _position, float3 _scale)
         IBData.pData    = grp.m_indices.data();
         IBData.DataSize = grp.m_indices.size() * sizeof (uint);// AVOID THIS PLEEEASE
 
-        device->CreateBuffer(IndexBuffDesc, &IBData, &grp.m_meshIndexBuffer);
+        m_device->CreateBuffer(IndexBuffDesc, &IBData, &grp.m_meshIndexBuffer);
     }
 
 
@@ -168,7 +157,7 @@ void Mesh::addTexture(std::string& _path, Group& _group)
         info.Name = _path.c_str();
         info.IsSRGB = pathToTex.find("_A") != std::string::npos;
 
-        CreateTextureFromFile(pathToTex.c_str(), info, Engine::instance->getDevice(), &tex);
+        CreateTextureFromFile(pathToTex.c_str(), info, m_device, &tex);
 
         if(!tex)
         {
@@ -192,7 +181,7 @@ void Mesh::addTexture(std::string& _path, Group& _group)
             textureData.NumSubresources = 1;
             textureData.pSubResources = &subResData;
 
-            Engine::instance->getDevice()->CreateTexture(desc, &textureData, &tex);
+            m_device->CreateTexture(desc, &textureData, &tex);
 
             stbi_image_free(data);
         }
@@ -209,11 +198,12 @@ void Mesh::addTexture(std::string &_path, int index)
     addTexture(_path, m_meshes[index]);
 }
 
-void Mesh::draw(RefCntAutoPtr<IDeviceContext> _context, RefCntAutoPtr<IShaderResourceBinding> _srb, FirstPersonCamera& _camera)
+void Mesh::draw(RefCntAutoPtr<IDeviceContext> _context, RefCntAutoPtr<IShaderResourceBinding> _srb, FirstPersonCamera& _camera
+, RefCntAutoPtr<IBuffer>& _bufferMatrices)
 {
 
     // Map the buffer and write current world-view-projection matrix
-    MapHelper<float4x4> CBConstants(_context, m_cbBuffer, MAP_WRITE, MAP_FLAG_DISCARD);
+    MapHelper<float4x4> CBConstants(_context, _bufferMatrices, MAP_WRITE, MAP_FLAG_DISCARD);
     *CBConstants = (m_model * _camera.GetViewMatrix() * _camera.GetProjMatrix()).Transpose();
 
     for (Group& grp : m_meshes)

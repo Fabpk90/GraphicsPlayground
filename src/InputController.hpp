@@ -67,6 +67,7 @@ enum class InputKeys
     AltDown,
     ZoomIn,
     ZoomOut,
+    R,
     TotalKeys
 };
 

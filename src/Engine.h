@@ -19,6 +19,13 @@
 
 using namespace Diligent;
 
+struct Constants
+{
+    float4 m_params;
+    float4 m_lightPos;
+    float4 m_camPos;
+};
+
 class Engine {
 
 public:
@@ -47,6 +54,9 @@ public:
     bool initializeDiligentEngine(HWND hwnd);
     void createResources();
 
+    void createLightingPipeline();
+    void renderLighting();
+
     void render();
     void present();
 
@@ -63,19 +73,27 @@ private:
     RefCntAutoPtr<IRenderDevice>  m_device;
     RefCntAutoPtr<IDeviceContext> m_immediateContext;
     RefCntAutoPtr<ISwapChain>     m_swapChain;
-    RefCntAutoPtr<IPipelineState> m_PSOGBuffer;
+    RefCntAutoPtr<IPipelineState> m_PSOLighting;
+    RefCntAutoPtr<IShaderResourceBinding> m_lightingSRB;
     RefCntAutoPtr<IPipelineState> m_PSOShowGBuffer;
     RefCntAutoPtr<IPipelineState> m_PSOFinal;
 
     ImGuiImplDiligent* m_imguiRenderer;
 
     RefCntAutoPtr<ITexture> m_gbufferNormal;
+    RefCntAutoPtr<ITexture> m_gbufferAlbedo;
+    RefCntAutoPtr<ITexture> m_depthTexture;
+
+    RefCntAutoPtr<ITexture> m_finalTexture;
 
     RefCntAutoPtr<IShaderResourceBinding> m_SRB;
 
-    Mesh* m_mesh;
+    RefCntAutoPtr<IBuffer> m_bufferMatrixMesh;
+
+    std::vector<Mesh*> m_meshes;
     FirstPersonCamera m_camera;
 
+    RefCntAutoPtr<IBuffer> m_bufferLighting;
 };
 
 

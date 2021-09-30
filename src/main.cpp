@@ -114,7 +114,7 @@ int WINAPI WinMain(HINSTANCE instance, HINSTANCE, LPSTR, int cmdShow)
     UpdateWindow(wnd);
 
     if (!engine->initializeDiligentEngine(wnd))
-    return -1;
+        return -1;
 
     engine->createResources();
 
