@@ -1,8 +1,11 @@
+#define USE_NORMAL_MAP
+
 Texture2D    g_TextureAlbedo;
 SamplerState g_TextureAlbedo_sampler;
-
-Texture2D    g_TextureNormal;
-SamplerState g_TextureNormal_sampler;
+#if defined(USE_NORMAL_MAP)
+    Texture2D    g_TextureNormal;
+    SamplerState g_TextureNormal_sampler;
+#endif
 
 struct PSInput
 {
@@ -21,5 +24,9 @@ void main(in  PSInput  PSIn,
           out PSOutput PSOut)
 {
     PSOut.Color = g_TextureAlbedo.Sample(g_TextureAlbedo_sampler, PSIn.UV);
-    PSOut.Normal = g_TextureNormal.Sample(g_TextureNormal_sampler, PSIn.UV);
+    #if defined(USE_NORMAL_MAP)
+        PSOut.Normal = g_TextureNormal.Sample(g_TextureNormal_sampler, PSIn.UV);
+    #else
+        PSOut.Normal = float4(PSIn.Normal, 0.0);
+    #endif
 }

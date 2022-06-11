@@ -11,18 +11,31 @@
 #define NOMINMAX
 #include <Windows.h>
 #include <iostream>
-#include <diligent/include/Platforms/Win32/interface/Win32NativeWindow.h>
-#include <diligent/include/Graphics/GraphicsEngineD3D12/interface/EngineFactoryD3D12.h>
-#include <diligent/include/Graphics/GraphicsEngineVulkan/interface/EngineFactoryVk.h>
-#include <diligent/include/Graphics/GraphicsTools/interface/MapHelper.hpp>
+
 
 #include "Engine.h"
+#include "EngineFactoryVk.h"
+#include "EngineFactoryD3D12.h"
+#include "Graphics/GraphicsTools/interface/MapHelper.hpp"
+#include "imgui.h"
+#include <array>
+#include <memory>
+#include <EASTL/unique_ptr.h>
+#include "ImGuiImplWin32.hpp"
+#include "Graphics/GraphicsTools/interface/DurationQueryHelper.hpp"
+#include "Tracy.hpp"
+#include "RayTracing.hpp"
+#include "TextureUtilities.h"
 
 Engine* Engine::instance = nullptr;
 
 bool Engine::initializeDiligentEngine(HWND hWnd)
 {
     SwapChainDesc SCDesc;
+    SCDesc.Usage = Diligent::SWAP_CHAIN_USAGE_RENDER_TARGET;
+
+    void* devicePointer = nullptr;
+
     switch (getRenderType())
     {
         case RENDER_DEVICE_TYPE_D3D12:
@@ -60,6 +73,8 @@ bool Engine::initializeDiligentEngine(HWND hWnd)
             {
                 Win32NativeWindow Window{hWnd};
                 pFactoryVk->CreateSwapChainVk(m_device, m_immediateContext, SCDesc, Window, &m_swapChain);
+
+                //devicePointer = reinterpret_cast<IRenderDeviceD3D12*>(m_device.RawPtr())->GetD3D12Device();
             }
         }
         break;
@@ -70,305 +85,419 @@ bool Engine::initializeDiligentEngine(HWND hWnd)
             break;
     }
 
-        return true;
+    m_imguiRenderer = new ImGuiImplWin32(hWnd, m_device, m_swapChain->GetDesc().ColorBufferFormat, m_swapChain->GetDesc().DepthBufferFormat);
+    auto& io = ImGui::GetIO();
+    io.IniFilename = "imgui.ini";
+
+    //if(getRenderType() == Diligent::RENDER_DEVICE_TYPE_VULKAN)
+    {
+        //m_renderdoc = new RenderDocHook(devicePointer, hWnd);
+    }
+
+    m_raytracing = new RayTracing(m_device);
+
+    return true;
 }
 
 void Engine::createResources()
 {
-    // Pipeline state object encompasses configuration of all GPU stages
+    initStatsResources();
+    createDefaultTextures();
+    m_gbuffer = new GBuffer(float2(m_width, m_height));
 
-    GraphicsPipelineStateCreateInfo PSOCreateInfo;
+    m_engineFactory->CreateDefaultShaderSourceStreamFactory("shader/", &m_ShaderSourceFactory);
 
-    // Pipeline state name is used by the engine to report issues.
-    // It is always a good idea to give objects descriptive names.
-    PSOCreateInfo.PSODesc.Name = "Simple Mesh PSO";
-
-    // This is a graphics pipeline
-    PSOCreateInfo.PSODesc.PipelineType = PIPELINE_TYPE_GRAPHICS;
-
-    // This tutorial will render to a single render target
-    PSOCreateInfo.GraphicsPipeline.NumRenderTargets             = 2;
-    // Set render target format which is the format of the swap chain's color buffer
-    PSOCreateInfo.GraphicsPipeline.RTVFormats[0]                = m_swapChain->GetDesc().ColorBufferFormat;
-    PSOCreateInfo.GraphicsPipeline.RTVFormats[1]                = TEX_FORMAT_RGBA8_UNORM;
-    // Use the depth buffer format from the swap chain
-    PSOCreateInfo.GraphicsPipeline.DSVFormat                    = m_swapChain->GetDesc().DepthBufferFormat;
-    // Primitive topology defines what kind of primitives will be rendered by this pipeline state
-    PSOCreateInfo.GraphicsPipeline.PrimitiveTopology            = PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
-    // No back face culling for this tutorial
-    PSOCreateInfo.GraphicsPipeline.RasterizerDesc.CullMode      = CULL_MODE_BACK;
-
-    LayoutElement layoutElements[] = {
-            LayoutElement(0, 0, 3, VT_FLOAT32),
-            LayoutElement (1, 0, 3, VT_FLOAT32),
-            LayoutElement (2, 0, 2, VT_FLOAT32)
-    };
-    m_meshes.push_back(new Mesh(m_device, "mesh/nanosuit/nanosuit.obj"));
-    m_meshes.push_back(new Mesh(m_device, "mesh/cerberus/Cerberus_LP.fbx"));
-    m_meshes[1]->getModel() *= float4x4::Translation(0, 0, 10);
-    m_meshes[1]->addTexture("Textures/Cerberus_N.tga", 0);
-
-    PSOCreateInfo.GraphicsPipeline.InputLayout.LayoutElements = layoutElements;
-    PSOCreateInfo.GraphicsPipeline.InputLayout.NumElements = _countof(layoutElements);
-
-
-    ShaderResourceVariableDesc Vars[] =
-    {
-            {SHADER_TYPE_PIXEL, "g_TextureAlbedo", SHADER_RESOURCE_VARIABLE_TYPE_DYNAMIC},
-            {SHADER_TYPE_PIXEL, "g_TextureNormal", SHADER_RESOURCE_VARIABLE_TYPE_DYNAMIC}
-    };
-    PSOCreateInfo.PSODesc.ResourceLayout.Variables    = Vars;
-    PSOCreateInfo.PSODesc.ResourceLayout.NumVariables = _countof(Vars);
-
-    SamplerDesc SamLinearClampDesc
-    {
-            FILTER_TYPE_LINEAR, FILTER_TYPE_LINEAR, FILTER_TYPE_LINEAR,
-            TEXTURE_ADDRESS_CLAMP, TEXTURE_ADDRESS_CLAMP, TEXTURE_ADDRESS_CLAMP
-    };
-    ImmutableSamplerDesc ImtblSamplers[] =
-    {
-            {SHADER_TYPE_PIXEL, "g_TextureAlbedo", SamLinearClampDesc},
-            {SHADER_TYPE_PIXEL, "g_TextureNormal", SamLinearClampDesc}
-    };
-    PSOCreateInfo.PSODesc.ResourceLayout.ImmutableSamplers    = ImtblSamplers;
-    PSOCreateInfo.PSODesc.ResourceLayout.NumImmutableSamplers = _countof(ImtblSamplers);
-
-    ShaderCreateInfo ShaderCI;
-
-    RefCntAutoPtr<IShaderSourceInputStreamFactory> pShaderSourceFactory;
-    m_engineFactory->CreateDefaultShaderSourceStreamFactory("shader/", &pShaderSourceFactory);
-    ShaderCI.pShaderSourceStreamFactory = pShaderSourceFactory;
-
-    // Tell the system that the shader source code is in HLSL.
-    // For OpenGL, the engine will convert this into GLSL under the hood
-    ShaderCI.SourceLanguage = SHADER_SOURCE_LANGUAGE_HLSL;
-    // OpenGL backend requires emulated combined HLSL texture samplers (g_Texture + g_Texture_sampler combination)
-    ShaderCI.UseCombinedTextureSamplers = true;
-    // Create a vertex shader
-    RefCntAutoPtr<IShader> pVS;
-    {
-        ShaderCI.Desc.ShaderType = SHADER_TYPE_VERTEX;
-        ShaderCI.EntryPoint      = "main";
-        ShaderCI.Desc.Name       = "Mesh vertex shader";
-        ShaderCI.FilePath        = "gbuffer/vs.hlsl";
-        m_device->CreateShader(ShaderCI, &pVS);
-    }
-
-    // Create a pixel shader
-    RefCntAutoPtr<IShader> pPS;
-    {
-        ShaderCI.Desc.ShaderType = SHADER_TYPE_PIXEL;
-        ShaderCI.EntryPoint      = "main";
-        ShaderCI.Desc.Name       = "Mesh pixel shader";
-        ShaderCI.FilePath        = "gbuffer/ps.hlsl";
-        m_device->CreateShader(ShaderCI, &pPS);
-    }
-
-
-    // Finally, create the pipeline state
-    PSOCreateInfo.pVS = pVS;
-    PSOCreateInfo.pPS = pPS;
-
-    m_device->CreateGraphicsPipelineState(PSOCreateInfo, &m_PSOFinal);
+    GraphicsPipelineDesc desc;
+    desc.NumRenderTargets             = 2;
+    desc.RTVFormats[0]                = m_swapChain->GetDesc().ColorBufferFormat;
+    desc.RTVFormats[1]                = TEX_FORMAT_RGBA8_UNORM;
+    desc.DSVFormat                    = m_swapChain->GetDesc().DepthBufferFormat;
+    desc.PrimitiveTopology            = PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
+    desc.RasterizerDesc.CullMode      = Diligent::CULL_MODE_BACK;
 
     BufferDesc cbDesc;
     cbDesc.Usage = Diligent::USAGE_DYNAMIC;
     cbDesc.BindFlags = Diligent::BIND_UNIFORM_BUFFER;
     cbDesc.CPUAccessFlags = Diligent::CPU_ACCESS_WRITE;
-    cbDesc.uiSizeInBytes = sizeof(float4x4);
+    cbDesc.Size = sizeof(float4x4);
+    cbDesc.Name = "UBO";
     m_device->CreateBuffer(cbDesc, nullptr, &m_bufferMatrixMesh);
 
-    m_PSOFinal->GetStaticVariableByName(SHADER_TYPE_VERTEX, "Constants")->Set(m_bufferMatrixMesh);
+    eastl::vector<LayoutElement> layoutElements = {
+            LayoutElement(0, 0, 3, VT_FLOAT32, False),
+            LayoutElement (1, 0, 3, VT_FLOAT32, True),
+            LayoutElement (2, 0, 2, VT_FLOAT32, False)
+    };
 
-    m_PSOFinal->CreateShaderResourceBinding(&m_SRB, true);
+    eastl::vector<PipelineState::StaticVarsStruct> vars = { {SHADER_TYPE_VERTEX, "Constants", m_bufferMatrixMesh} };
 
-    TextureDesc desc;
-    desc.Format = TEX_FORMAT_RGBA8_UNORM;
-    desc.Width = m_width;
-    desc.Height = m_height;
-    desc.Type = Diligent::RESOURCE_DIM_TEX_2D;
-    desc.BindFlags = BIND_RENDER_TARGET | BIND_SHADER_RESOURCE;
-
-    m_device->CreateTexture(desc, nullptr, &m_gbufferNormal);
-
-    desc.Format = m_swapChain->GetDesc().ColorBufferFormat;
-    m_device->CreateTexture(desc, nullptr, &m_gbufferAlbedo);
-
-    desc.BindFlags = BIND_RENDER_TARGET  | BIND_DEPTH_STENCIL | BIND_SHADER_RESOURCE;
-    desc.Format = Diligent::TEX_FORMAT_D32_FLOAT;
-    m_device->CreateTexture(desc, nullptr, &m_depthTexture);
-
-    desc.BindFlags = BIND_RENDER_TARGET | BIND_UNORDERED_ACCESS;
-    desc.Format =  m_swapChain->GetDesc().ColorBufferFormat;
-    m_device->CreateTexture(desc, nullptr, &m_finalTexture);
-
-    //ugly hack, this version of diligent doesn't include this strange. I'll look into it later
-    m_imguiRenderer = new ImGuiImplDiligent(m_device, m_swapChain->GetDesc().ColorBufferFormat, m_swapChain->GetDesc().DepthBufferFormat);
-    m_imguiRenderer->CreateDeviceObjects();
-    m_imguiRenderer->UpdateFontsTexture();
+    m_pipelines[PSO_GBUFFER] = eastl::make_unique<PipelineState>(m_device, "Simple Mesh PSO", PIPELINE_TYPE_GRAPHICS, "gbuffer", vars
+                                                               , desc, layoutElements);
 
     m_camera.SetPos(float3(0, 0, -20));
     m_camera.SetProjAttribs(0.01f, 1000, (float)m_width / (float) m_height, 45.0f, Diligent::SURFACE_TRANSFORM_OPTIMAL, false);
 
     createLightingPipeline();
+    createTransparencyPipeline();
+
+    m_meshes.push_back(new Mesh(m_device, "mesh/Bunny/stanford-bunny.obj"));
+    m_meshes.push_back(new Mesh(m_device, "mesh/cerberus/Cerberus_LP.fbx"));
+    //  m_meshes.push_back(new Mesh(m_device, "mesh/Sponza/Sponza.fbx"));
+    m_meshes[1]->getModel() *= float4x4::Translation(0, 0, 10);
+    m_meshes[1]->addTexture("Textures/Cerberus_N.tga", 0);
 }
 
 void Engine::render()
 {
-    m_camera.Update(m_inputController, 0.16f);
+    if(m_isMinimized) return;
 
     if(m_inputController.IsKeyDown(Diligent::InputKeys::R))
     {
-        createLightingPipeline();
+        ZoneScopedN("Reload pipeline");
+        m_pipelines[PSO_LIGHTING]->reload();
     }
 
-    //m_imguiRenderer->NewFrame(m_width, m_height, Diligent::SURFACE_TRANSFORM_OPTIMAL);
-       // ImGui::Text("%f %f %f", m_camera.GetPos().x, m_camera.GetPos().y, m_camera.GetPos().z);
-   // m_imguiRenderer->EndFrame();
+    ZoneScopedN("Render");
+
+    m_camera.Update(m_inputController, 0.16f);
+
+    startCollectingStats();
 
     // Set render targets before issuing any draw command.
     // Note that Present() unbinds the back buffer if it is set as render target.
-    ITextureView* pRTV[] = {m_gbufferAlbedo->GetDefaultView(Diligent::TEXTURE_VIEW_RENDER_TARGET)
-                            , m_gbufferNormal->GetDefaultView(Diligent::TEXTURE_VIEW_RENDER_TARGET)};
-    auto* pDSV = m_depthTexture->GetDefaultView(Diligent::TEXTURE_VIEW_DEPTH_STENCIL);
-    m_immediateContext->SetRenderTargets(2, pRTV, pDSV, RESOURCE_STATE_TRANSITION_MODE_TRANSITION);
+    ITextureView* pRTV[] = {m_gbuffer->GetTextureType(GBuffer::EGBufferType::Albedo)->GetDefaultView(Diligent::TEXTURE_VIEW_RENDER_TARGET)
+                            , m_gbuffer->GetTextureType(GBuffer::EGBufferType::Normal)->GetDefaultView(Diligent::TEXTURE_VIEW_RENDER_TARGET)};
+    auto pDSV = m_gbuffer->GetTextureType(GBuffer::EGBufferType::Depth);// m_swapChain->GetDepthBufferDSV();
+    m_immediateContext->SetRenderTargets(2, pRTV, pDSV->GetDefaultView(Diligent::TEXTURE_VIEW_DEPTH_STENCIL), RESOURCE_STATE_TRANSITION_MODE_TRANSITION);
 
-    m_immediateContext->SetPipelineState(m_PSOFinal);
+    auto& psoFinal = m_pipelines[PSO_GBUFFER];
+
+    m_immediateContext->SetPipelineState(psoFinal->getPipeline());
 
     const float ClearColor[] = {0.0f, 181.f / 255.f, 221.f / 255.f, 1.0f};
     const float ClearColorNormal[] = {0.0f, 0.0f, 0.0f, 1.0f};
     // Let the engine perform required state transitions
     m_immediateContext->ClearRenderTarget(pRTV[0], ClearColor, RESOURCE_STATE_TRANSITION_MODE_TRANSITION);
     m_immediateContext->ClearRenderTarget(pRTV[1], ClearColorNormal, RESOURCE_STATE_TRANSITION_MODE_TRANSITION);
-    m_immediateContext->ClearDepthStencil(pDSV, CLEAR_DEPTH_FLAG, 1.f, 0, RESOURCE_STATE_TRANSITION_MODE_TRANSITION);
+    m_immediateContext->ClearDepthStencil(pDSV->GetDefaultView(Diligent::TEXTURE_VIEW_DEPTH_STENCIL), CLEAR_DEPTH_FLAG, 1.f, 0, RESOURCE_STATE_TRANSITION_MODE_TRANSITION);
 
     for(Mesh* m : m_meshes)
     {
-        m->draw(m_immediateContext, m_SRB, m_camera, m_bufferMatrixMesh);
+        m->draw(m_immediateContext, &psoFinal->getSRB(), m_camera, m_bufferMatrixMesh, m_defaultTextures);
     }
-
-   // m_imguiRenderer->Render(m_immediateContext);
 
     renderLighting();
 
     CopyTextureAttribs attribs;
     attribs.pDstTexture = m_swapChain->GetCurrentBackBufferRTV()->GetTexture();
-    attribs.pSrcTexture = m_finalTexture;
-
-    ITextureView* view[] = {m_swapChain->GetCurrentBackBufferRTV()};
-
-    m_immediateContext->SetRenderTargets(0, nullptr,
-                                        nullptr, RESOURCE_STATE_TRANSITION_MODE_TRANSITION);
+    attribs.DstTextureTransitionMode = RESOURCE_STATE_TRANSITION_MODE_TRANSITION;
+    attribs.pSrcTexture = m_gbuffer->GetTextureType(GBuffer::EGBufferType::Output);
+    attribs.SrcTextureTransitionMode = RESOURCE_STATE_TRANSITION_MODE_TRANSITION;
 
     m_immediateContext->CopyTexture(attribs);
 
+    ITextureView* view[] = {m_swapChain->GetCurrentBackBufferRTV()};
+
     m_immediateContext->SetRenderTargets(1, view,
-                                         m_depthTexture->GetDefaultView(TEXTURE_VIEW_DEPTH_STENCIL)
+                                         m_swapChain->GetDepthBufferDSV()
                                          , RESOURCE_STATE_TRANSITION_MODE_TRANSITION);
 
+    endCollectingStats();
+    uiPass();
+}
+
+void Engine::uiPass()
+{
+    m_imguiRenderer->NewFrame(m_width, m_height, SURFACE_TRANSFORM_IDENTITY);
+    ImGui::Begin("Inspector");
+    ImGui::Text("%f %f %f", m_camera.GetPos().x, m_camera.GetPos().y, m_camera.GetPos().z);
+    ImGui::SliderFloat4("Pos light: ", m_lightPos.Data(), -5, 5);
+
+    for(Mesh* m : m_meshes)
+    {
+        m->drawInspector();
+    }
+    ImGui::End();
+
+    ImGui::Begin("Debug", nullptr, ImGuiWindowFlags_AlwaysAutoResize);
+    {
+        auto &desc = m_gbuffer->GetTextureType(GBuffer::EGBufferType::Albedo)->GetDesc();
+        ImGui::Text("%s", desc.Name);
+        ImGui::Image(
+                m_gbuffer->GetTextureType(GBuffer::EGBufferType::Albedo)->GetDefaultView(TEXTURE_VIEW_SHADER_RESOURCE),
+                ImVec2(desc.Width / 4, desc.Height / 4));
+    }
+    {
+        auto &desc = m_gbuffer->GetTextureType(GBuffer::EGBufferType::Normal)->GetDesc();
+        ImGui::Text("%s", desc.Name);
+        ImGui::Image(
+                m_gbuffer->GetTextureType(GBuffer::EGBufferType::Normal)->GetDefaultView(TEXTURE_VIEW_SHADER_RESOURCE),
+                ImVec2(desc.Width / 4, desc.Height / 4));
+    }
+    ImGui::End();
+
+    showStats();
+    m_imguiRenderer->Render(m_immediateContext);
 }
 
 void Engine::present()
 {
-    m_swapChain->Present();
+    if(!m_isMinimized)
+        m_swapChain->Present();
 }
 
 void Engine::createLightingPipeline()
 {
-    ComputePipelineStateCreateInfo  PSOCreateInfo;
-    PSOCreateInfo.PSODesc.Name = "Compute_LightingPipeline";
-
-    PSOCreateInfo.PSODesc.ResourceLayout.DefaultVariableType = Diligent::SHADER_RESOURCE_VARIABLE_TYPE_STATIC;
-
-    ShaderResourceVariableDesc Vars[] =
-    {
-            {SHADER_TYPE_COMPUTE, "g_color", Diligent::SHADER_RESOURCE_VARIABLE_TYPE_STATIC},
-            {SHADER_TYPE_COMPUTE, "g_normal", SHADER_RESOURCE_VARIABLE_TYPE_STATIC},
-            {SHADER_TYPE_COMPUTE, "g_depth", SHADER_RESOURCE_VARIABLE_TYPE_STATIC},
-            {SHADER_TYPE_COMPUTE, "g_output", SHADER_RESOURCE_VARIABLE_TYPE_STATIC},
-            {SHADER_TYPE_COMPUTE, "Constants", SHADER_RESOURCE_VARIABLE_TYPE_STATIC}
-    };
-    PSOCreateInfo.PSODesc.ResourceLayout.Variables    = Vars;
-    PSOCreateInfo.PSODesc.ResourceLayout.NumVariables = _countof(Vars);
-
-    SamplerDesc SamLinearClampDesc
-    {
-            FILTER_TYPE_LINEAR, FILTER_TYPE_LINEAR, FILTER_TYPE_LINEAR,
-            TEXTURE_ADDRESS_CLAMP, TEXTURE_ADDRESS_CLAMP, TEXTURE_ADDRESS_CLAMP
-    };
-
-    ImmutableSamplerDesc ImtblSamplers[] =
-    {
-            {SHADER_TYPE_COMPUTE, "g_color", SamLinearClampDesc},
-            {SHADER_TYPE_COMPUTE, "g_normal", SamLinearClampDesc}
-    };
-    PSOCreateInfo.PSODesc.ResourceLayout.ImmutableSamplers    = ImtblSamplers;
-    PSOCreateInfo.PSODesc.ResourceLayout.NumImmutableSamplers = _countof(ImtblSamplers);
-
-    RefCntAutoPtr<IShaderSourceInputStreamFactory> pShaderSourceFactory;
-    m_engineFactory->CreateDefaultShaderSourceStreamFactory("shader/", &pShaderSourceFactory);
-
-    ShaderCreateInfo ShaderCI;
-    ShaderCI.pShaderSourceStreamFactory = pShaderSourceFactory;
-
-    ShaderCI.SourceLanguage = SHADER_SOURCE_LANGUAGE_HLSL;
-    ShaderCI.UseCombinedTextureSamplers = true;
-
-    RefCntAutoPtr<IShader> pCS;
-    {
-        ShaderCI.Desc.ShaderType = Diligent::SHADER_TYPE_COMPUTE;
-        ShaderCI.Desc.Name       = "Lighting shader";
-        ShaderCI.EntryPoint      = "main";
-        ShaderCI.FilePath        = "lighting/lighting.hlsl";
-        m_device->CreateShader(ShaderCI, &pCS);
-    }
-
-    PSOCreateInfo.pCS = pCS;
-
     //Lighting buffer
     BufferDesc cbDesc;
     cbDesc.Usage = USAGE_DYNAMIC;
     cbDesc.BindFlags = BIND_UNIFORM_BUFFER;
     cbDesc.CPUAccessFlags = CPU_ACCESS_WRITE;
-    cbDesc.uiSizeInBytes = sizeof(Constants);
+    cbDesc.ElementByteStride = sizeof(Constants);
+    cbDesc.Size = sizeof(Constants);
     m_device->CreateBuffer(cbDesc, nullptr, &m_bufferLighting);
 
-    m_device->CreateComputePipelineState(PSOCreateInfo, &m_PSOLighting);
+    eastl::vector<PipelineState::StaticVarsStruct> vars = { {SHADER_TYPE_COMPUTE, "Constants", m_bufferLighting} };
 
-    m_PSOLighting->GetStaticVariableByName(SHADER_TYPE_COMPUTE, "Constants")->Set(m_bufferLighting);
+    m_pipelines[PSO_LIGHTING] = eastl::make_unique<PipelineState>(m_device, "Compute Lighting PSO", PIPELINE_TYPE_COMPUTE, "lighting", vars);
+    auto& psoLighting = m_pipelines[PSO_LIGHTING];
+    auto& srb = psoLighting->getSRB();
 
-    m_PSOLighting->GetStaticVariableByName(SHADER_TYPE_COMPUTE, "g_color")
-    ->Set(m_gbufferAlbedo->GetDefaultView(Diligent::TEXTURE_VIEW_SHADER_RESOURCE));
+    srb.GetVariableByName(SHADER_TYPE_COMPUTE, "g_color")
+            ->Set(m_gbuffer->GetTextureType(GBuffer::EGBufferType::Albedo)->GetDefaultView(Diligent::TEXTURE_VIEW_SHADER_RESOURCE));
 
-    m_PSOLighting->GetStaticVariableByName(SHADER_TYPE_COMPUTE, "g_normal")
-    ->Set(m_gbufferNormal->GetDefaultView(Diligent::TEXTURE_VIEW_SHADER_RESOURCE));
+    srb.GetVariableByName(SHADER_TYPE_COMPUTE, "g_normal")
+    ->Set(m_gbuffer->GetTextureType(GBuffer::EGBufferType::Normal)->GetDefaultView(Diligent::TEXTURE_VIEW_SHADER_RESOURCE));
 
-    m_PSOLighting->GetStaticVariableByName(SHADER_TYPE_COMPUTE, "g_depth")
-            ->Set(m_depthTexture->GetDefaultView(TEXTURE_VIEW_SHADER_RESOURCE));
+    srb.GetVariableByName(SHADER_TYPE_COMPUTE, "g_depth")
+            ->Set(m_gbuffer->GetTextureType(GBuffer::EGBufferType::Depth)->GetDefaultView(Diligent::TEXTURE_VIEW_SHADER_RESOURCE));
 
-    m_PSOLighting->GetStaticVariableByName(SHADER_TYPE_COMPUTE, "g_output")
-    ->Set(m_finalTexture->GetDefaultView(Diligent::TEXTURE_VIEW_UNORDERED_ACCESS));
-
-    m_PSOLighting->CreateShaderResourceBinding(&m_lightingSRB, true);
+    //todo: change this when resizing (maybe a callback system for resize event ?)
+    srb.GetVariableByName(SHADER_TYPE_COMPUTE, "g_output")
+    ->Set(m_gbuffer->GetTextureType(GBuffer::EGBufferType::Output)->GetDefaultView(Diligent::TEXTURE_VIEW_UNORDERED_ACCESS));
 }
 
 void Engine::renderLighting()
 {
-    DispatchComputeAttribs DispatAttribs;
-    DispatAttribs.ThreadGroupCountX = (m_width) / 8;
-    DispatAttribs.ThreadGroupCountY = (m_height) / 8;
+    ZoneScopedN("Render/Lighting - CPU");
+    DispatchComputeAttribs dispatchComputeAttribs;
+    dispatchComputeAttribs.ThreadGroupCountX = (m_width) / 8;
+    dispatchComputeAttribs.ThreadGroupCountY = (m_height) / 8;
 
-    m_immediateContext->SetPipelineState(m_PSOLighting);
-    m_immediateContext->CommitShaderResources(m_lightingSRB, Diligent::RESOURCE_STATE_TRANSITION_MODE_TRANSITION);
+    auto& pipelineLighting = m_pipelines[PSO_LIGHTING];
+
+    m_immediateContext->SetPipelineState(pipelineLighting->getPipeline());
+    m_immediateContext->CommitShaderResources(&pipelineLighting->getSRB(), Diligent::RESOURCE_STATE_TRANSITION_MODE_TRANSITION);
 
     Constants cst;
     auto& camParams = m_camera.GetProjAttribs();
     cst.m_params = float4(m_width, m_height, camParams.NearClipPlane, camParams.FarClipPlane);
-    cst.m_lightPos = float4(0, 1, 0, 0);
+    cst.m_lightPos = m_lightPos == float4(0) ? float4(1) : normalize(m_lightPos);
     cst.m_camPos = m_camera.GetPos();
 
-    MapHelper<Constants> mapBuffer(m_immediateContext, m_bufferLighting, Diligent::MAP_WRITE, Diligent::MAP_FLAG_DISCARD);
-    *mapBuffer = cst;
+    {
+        MapHelper<Constants> mapBuffer(m_immediateContext, m_bufferLighting, Diligent::MAP_WRITE, Diligent::MAP_FLAG_DISCARD);
+        *mapBuffer = cst;
+    }
 
-    m_immediateContext->DispatchCompute(DispatAttribs);
+    m_immediateContext->DispatchCompute(dispatchComputeAttribs);
+}
+
+void Engine::showStats()
+{
+    if (ImGui::Begin("Query data", nullptr, ImGuiWindowFlags_AlwaysAutoResize))
+    {
+        if (m_pPipelineStatsQuery || m_pOcclusionQuery || m_pDurationQuery || m_pDurationFromTimestamps)
+        {
+            std::stringstream params_ss, values_ss;
+            if (m_pPipelineStatsQuery)
+            {
+                params_ss << "Input vertices" << std::endl
+                          << "Input primitives" << std::endl
+                          << "VS Invocations" << std::endl
+                          << "Clipping Invocations" << std::endl
+                          << "Rasterized Primitives" << std::endl
+                          << "PS Invocations" << std::endl;
+
+                values_ss << m_PipelineStatsData.InputVertices << std::endl
+                          << m_PipelineStatsData.InputPrimitives << std::endl
+                          << m_PipelineStatsData.VSInvocations << std::endl
+                          << m_PipelineStatsData.ClippingInvocations << std::endl
+                          << m_PipelineStatsData.ClippingPrimitives << std::endl
+                          << m_PipelineStatsData.PSInvocations << std::endl;
+            }
+
+            if (m_pOcclusionQuery)
+            {
+                params_ss << "Samples rendered" << std::endl;
+                values_ss << m_OcclusionData.NumSamples << std::endl;
+            }
+
+            if (m_pDurationQuery)
+            {
+                if (m_DurationData.Frequency > 0)
+                {
+                    params_ss << "Duration (ms)" << std::endl;
+                    values_ss << std::fixed << std::setprecision(2)
+                              << static_cast<float>(m_DurationData.Duration) / static_cast<float>(m_DurationData.Frequency) * 1000.f << std::endl;
+                }
+                else
+                {
+                    params_ss << "Duration unavailable" << std::endl;
+                }
+            }
+
+            if (m_pDurationFromTimestamps)
+            {
+                params_ss << "Duration from TS (ms)" << std::endl;
+                values_ss << std::fixed << std::setprecision(2)
+                          <<(m_DurationFromTimestamps * 1000) << std::endl;
+            }
+
+            ImGui::TextDisabled("%s", params_ss.str().c_str());
+            ImGui::SameLine();
+            ImGui::TextDisabled("%s", values_ss.str().c_str());
+        }
+        else
+        {
+            ImGui::TextDisabled("Queries are not supported by this device");
+        }
+    }
+    ImGui::End();
+}
+
+void Engine::initStatsResources()
+{
+    // Check query support
+    const auto& Features = m_device->GetDeviceInfo().Features;
+    if (Features.PipelineStatisticsQueries)
+    {
+        QueryDesc queryDesc;
+        queryDesc.Name = "Pipeline statistics query";
+        queryDesc.Type = QUERY_TYPE_PIPELINE_STATISTICS;
+        m_pPipelineStatsQuery = eastl::make_unique<ScopedQueryHelper>(m_device, queryDesc, 2);
+    }
+
+    if (Features.OcclusionQueries)
+    {
+        QueryDesc queryDesc;
+        queryDesc.Name = "Occlusion query";
+        queryDesc.Type = QUERY_TYPE_OCCLUSION;
+        m_pOcclusionQuery = eastl::make_unique<ScopedQueryHelper>(m_device, queryDesc, 2);
+    }
+
+    if (Features.DurationQueries)
+    {
+        QueryDesc queryDesc;
+        queryDesc.Name = "Duration query";
+        queryDesc.Type = QUERY_TYPE_DURATION;
+        m_pDurationQuery = eastl::make_unique<ScopedQueryHelper>(m_device, queryDesc, 2);
+    }
+
+    if (Features.TimestampQueries)
+    {
+        m_pDurationFromTimestamps = eastl::make_unique<DurationQueryHelper>(m_device, 2);
+    }
+}
+
+void Engine::startCollectingStats()
+{
+    if(m_pPipelineStatsQuery)
+    {
+        m_pPipelineStatsQuery->Begin(m_immediateContext);
+    }
+    if(m_pOcclusionQuery)
+    {
+        m_pOcclusionQuery->Begin(m_immediateContext);
+    }
+     if(m_pDurationQuery)
+     {
+         m_pDurationQuery->Begin(m_immediateContext);
+     }
+
+     if(m_pDurationFromTimestamps)
+     {
+         m_pDurationFromTimestamps->Begin(m_immediateContext);
+     }
+}
+
+void Engine::endCollectingStats()
+{
+    if(m_pDurationQuery)
+    {
+        m_pDurationQuery->End(m_immediateContext, &m_DurationData, sizeof(m_DurationData));
+    }
+
+    if(m_pOcclusionQuery)
+    {
+        m_pOcclusionQuery->End(m_immediateContext, &m_OcclusionData, sizeof(m_OcclusionData));
+    }
+
+    if(m_pPipelineStatsQuery)
+    {
+        m_pPipelineStatsQuery->End(m_immediateContext, &m_PipelineStatsData, sizeof(m_PipelineStatsData));
+    }
+
+    if(m_pDurationFromTimestamps)
+    {
+        m_pDurationFromTimestamps->End(m_immediateContext, m_DurationFromTimestamps);
+    }
+}
+
+Engine::~Engine()
+{
+    m_immediateContext->Flush();
+
+    delete m_gbuffer;
+    delete m_renderdoc;
+    delete m_raytracing;
+    delete m_imguiRenderer;
+}
+
+void Engine::createDefaultTextures()
+{
+    std::cout << "Init default textures" << std::endl;
+
+    TextureLoadInfo info;
+    info.Name = "Default Albedo";
+    info.Format = Diligent::TEX_FORMAT_RGBA8_UNORM_SRGB;
+    info.BindFlags = Diligent::BIND_SHADER_RESOURCE;
+    info.IsSRGB = True;
+    info.GenerateMips = False;
+
+    RefCntAutoPtr<ITexture> texAlbedo;
+    CreateTextureFromFile("textures/defaults/white16x16.png", info, m_device, &texAlbedo);
+    m_defaultTextures["albedo"] = texAlbedo;
+
+    info.IsSRGB = False;
+    info.Format = Diligent::TEX_FORMAT_RGBA8_UNORM;
+
+    RefCntAutoPtr<ITexture> texNormal;
+    CreateTextureFromFile("textures/defaults/normal16x16.png", info, m_device, &texNormal);
+    m_defaultTextures["normal"] = texNormal;
+}
+
+void Engine::createTransparencyPipeline()
+{
+    GraphicsPipelineDesc desc;
+    desc.NumRenderTargets             = 1;
+    desc.RTVFormats[0]                = m_swapChain->GetDesc().ColorBufferFormat;
+    desc.DSVFormat                    = m_swapChain->GetDesc().DepthBufferFormat;
+    desc.PrimitiveTopology            = PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
+    desc.RasterizerDesc.CullMode      = Diligent::CULL_MODE_BACK;
+
+    desc.BlendDesc.RenderTargets[0].BlendEnable = True;
+    desc.BlendDesc.RenderTargets[0].BlendOp = Diligent::BLEND_OPERATION_ADD;
+
+    desc.BlendDesc.RenderTargets[0].SrcBlend = Diligent::BLEND_FACTOR_SRC1_ALPHA;
+    //desc.BlendDesc.RenderTargets[0]. = Diligent::BLEND_FACTOR_SRC1_ALPHA;
+
+    eastl::vector<LayoutElement> layoutElements = {
+            LayoutElement(0, 0, 4, Diligent::VT_FLOAT32),
+            LayoutElement(1, 0, 2, Diligent::VT_FLOAT32, True)
+    };
+    eastl::vector<PipelineState::StaticVarsStruct> vars = { {SHADER_TYPE_VERTEX, "Constants", m_bufferMatrixMesh} };
+
+    m_pipelines[PSO_TRANSPARENCY] = eastl::make_unique<PipelineState>(m_device, "Transparency PSO", PIPELINE_TYPE_GRAPHICS, "transparency", vars
+            , desc, layoutElements);
 }

@@ -1,3 +1,25 @@
+#include <mimalloc.h>
+#include <mimalloc-new-delete.h>
+#include "Tracy.hpp"
+
+void* operator new[](size_t size, const char* pName, int flags, unsigned debugFlags, const char* file, int line)
+{
+    auto ptr = mi_new(size);
+    TracySecureAlloc(ptr, size);
+    return ptr;
+}
+void* operator new[](size_t size, size_t alignment, size_t alignmentOffset, const char* pName, int flags, unsigned debugFlags, const char* file, int line)
+{
+    /*if(allocator == nullptr)
+    {
+        allocator = new eastl::allocator_malloc("Allocator");
+    }*/
+
+    auto ptr = mi_new_aligned(size, alignment);
+    TracySecureAlloc(ptr, size)
+
+    return ptr;
+}
 
 #define STB_IMAGE_IMPLEMENTATION
 #include <stb/stb_image.h>
@@ -18,7 +40,6 @@
 #endif
 
 
-#include <diligent/include/Graphics/GraphicsEngine/interface/GraphicsTypes.h>
 #include "Engine.h"
 
 using namespace Diligent;
@@ -39,7 +60,10 @@ LRESULT CALLBACK MessageProc(HWND wnd, UINT message, WPARAM wParam, LPARAM lPara
     WindowMessageData data{wnd, message, wParam, lParam};
 
     if(engine)
+    {
         engine->m_inputController.HandleNativeMessage(static_cast<WindowMessageData*>(&data));
+        engine->m_imguiRenderer->Win32_ProcHandler(wnd, message, wParam, lParam);
+    }
 
     switch (message) {
         case WM_PAINT: {
@@ -78,23 +102,24 @@ LRESULT CALLBACK MessageProc(HWND wnd, UINT message, WPARAM wParam, LPARAM lPara
 
 int WINAPI WinMain(HINSTANCE instance, HINSTANCE, LPSTR, int cmdShow)
 {
+    ZoneScoped;
     #if defined(_DEBUG) || defined(DEBUG)
     _CrtSetDbgFlag(_CRTDBG_ALLOC_MEM_DF | _CRTDBG_LEAK_CHECK_DF);
     #endif
 
     engine = std::make_unique<Engine>();
 
-    std::string Title("Graphics Playground");
+    std::wstring Title(L"Graphics Playground");
     switch (engine->getRenderType())
     {
-        case RENDER_DEVICE_TYPE_D3D11: Title.append(" (D3D11)"); break;
-        case RENDER_DEVICE_TYPE_D3D12: Title.append(" (D3D12)"); break;
-        case RENDER_DEVICE_TYPE_GL: Title.append(" (GL)"); break;
-        case RENDER_DEVICE_TYPE_VULKAN: Title.append(" (VK)"); break;
+        case RENDER_DEVICE_TYPE_D3D11: Title.append(L" (D3D11)"); break;
+        case RENDER_DEVICE_TYPE_D3D12: Title.append(L" (D3D12)"); break;
+        case RENDER_DEVICE_TYPE_GL: Title.append(L" (GL)"); break;
+        case RENDER_DEVICE_TYPE_VULKAN: Title.append(L" (VK)"); break;
     }
     // Register our window class
     WNDCLASSEX wcex = {sizeof(WNDCLASSEX), CS_HREDRAW | CS_VREDRAW, MessageProc,
-                       0L, 0L, instance, nullptr, nullptr, nullptr, nullptr,("SampleApp"), nullptr};
+                       0L, 0L, instance, nullptr, nullptr, nullptr, nullptr,TEXT("SampleApp"), nullptr};
     RegisterClassEx(&wcex);
 
     // Create a window
@@ -102,12 +127,12 @@ int WINAPI WinMain(HINSTANCE instance, HINSTANCE, LPSTR, int cmdShow)
     LONG WindowHeight = 1024;
     RECT rc           = {0, 0, WindowWidth, WindowHeight};
     AdjustWindowRect(&rc, WS_OVERLAPPEDWINDOW, FALSE);
-    HWND wnd = CreateWindow(("SampleApp"), (Title.c_str()),
+    HWND wnd = CreateWindow(TEXT("SampleApp"), Title.c_str(),
                             WS_OVERLAPPEDWINDOW, CW_USEDEFAULT, CW_USEDEFAULT,
                             rc.right - rc.left, rc.bottom - rc.top, nullptr, nullptr, instance, nullptr);
     if (!wnd)
     {
-        MessageBox(nullptr, ("Cannot create window"), ("Error"), MB_OK | MB_ICONERROR);
+        MessageBox(nullptr, (TEXT("Cannot create window")), TEXT("Error"), MB_OK | MB_ICONERROR);
         return 0;
     }
     ShowWindow(wnd, cmdShow);

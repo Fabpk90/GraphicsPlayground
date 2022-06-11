@@ -7,6 +7,7 @@
 # Reference: https://intellij-support.jetbrains.com/hc/en-us/articles/206544839
 
 !bin/*.dll
+!bin/mesh/Sponza
 
 # User-specific stuff
 .idea/**/workspace.xml
@@ -504,3 +505,12 @@ FodyWeavers.xsd
 # Additional files built by Visual Studio
 
 # End of https://www.toptal.com/developers/gitignore/api/clion,visualstudio
+bin/Archiver_64d.dll
+
+bin/GraphicsEngineD3D11_64d.dll
+
+bin/GraphicsEngineD3D12_64d.dll
+
+bin/GraphicsEngineOpenGL_64d.dll
+
+bin/GraphicsEngineVk_64d.dll

@@ -3,45 +3,50 @@
 //
 
 #include "Mesh.h"
+#include "TextureUtilities.h"
+#include "Graphics/GraphicsTools/interface/MapHelper.hpp"
+#include "imgui.h"
+#include "Tracy.hpp"
 #include <fstream>
 #include <assimp/Importer.hpp>
+#include <utility>
 #include <assimp/postprocess.h>
-#include <diligent/include/TextureLoader/interface/TextureLoader.h>
-#include <diligent/include/TextureLoader/interface/TextureUtilities.h>
 #include <stb/stb_image.h>
-#include <diligent/include/Graphics/GraphicsTools/interface/MapHelper.hpp>
 
 using namespace Diligent;
 
-Mesh::Mesh(RefCntAutoPtr<IRenderDevice> _device, const char *_path, float3 _position, float3 _scale)
-: m_path(_path), m_position(_position), m_scale(_scale), m_device(_device)
+Mesh::Mesh(RefCntAutoPtr<IRenderDevice> _device, const char *_path, float3 _position, float3 _scale, float3 _angle)
+: m_path(_path), m_position(_position), m_scale(_scale), m_device(eastl::move(_device)), m_angle(_angle)
 {
+    ZoneScopedN("Load Mesh");
     m_model = float4x4::Scale(m_scale) * float4x4::Translation(m_position);
 
     auto index = m_path.find_last_of('/') + 1; // +1 to include the /
     m_path = m_path.substr(0, index);
 
-    std::ifstream file(_path);
-
-    if(file.good())
     {
-        Assimp::Importer importer;
-        const aiScene* scene = importer.ReadFile(_path, aiProcess_Triangulate | aiProcess_FlipUVs | aiProcess_GenNormals);
+        std::ifstream file(_path);
 
-        m_meshes.reserve(scene->mNumMeshes);
+        if(file.good())
+        {
+            Assimp::Importer importer;
+            const aiScene* scene = importer.ReadFile(_path, aiProcessPreset_TargetRealtime_MaxQuality);
 
-        recursivelyLoadNode(scene->mRootNode, scene);
+            m_meshes.reserve(scene->mNumMeshes);
 
-        importer.FreeScene();
+            recursivelyLoadNode(scene->mRootNode, scene);
+
+            importer.FreeScene();
+        }
     }
 
     for(Group& grp : m_meshes)
     {
         BufferDesc VertBuffDesc;
-        VertBuffDesc.Name          = "Mesh vertex buffer";
-        VertBuffDesc.Usage         = USAGE_IMMUTABLE;
-        VertBuffDesc.BindFlags     = BIND_VERTEX_BUFFER;
-        VertBuffDesc.uiSizeInBytes          = grp.m_vertices.size() * sizeof(Vertex);
+        VertBuffDesc.Name = "Mesh vertex buffer";
+        VertBuffDesc.Usage = USAGE_IMMUTABLE;
+        VertBuffDesc.BindFlags = BIND_VERTEX_BUFFER;
+        VertBuffDesc.Size = sizeof(Vertex) * grp.m_vertices.size();
         BufferData VBData;
         VBData.pData    = grp.m_vertices.data();
         VBData.DataSize = grp.m_vertices.size() * sizeof (Vertex);// AVOID THIS PLEEEASE
@@ -49,10 +54,10 @@ Mesh::Mesh(RefCntAutoPtr<IRenderDevice> _device, const char *_path, float3 _posi
         m_device->CreateBuffer(VertBuffDesc, &VBData, &grp.m_meshVertexBuffer);
 
         BufferDesc IndexBuffDesc;
-        IndexBuffDesc.Name          = "Mesh vertex buffer";
-        IndexBuffDesc.Usage         = USAGE_IMMUTABLE;
-        IndexBuffDesc.BindFlags     = BIND_INDEX_BUFFER;
-        IndexBuffDesc.uiSizeInBytes          =  grp.m_indices.size() * sizeof(uint);
+        IndexBuffDesc.Name = "Mesh vertex buffer";
+        IndexBuffDesc.Usage = USAGE_IMMUTABLE;
+        IndexBuffDesc.BindFlags = BIND_INDEX_BUFFER;
+        IndexBuffDesc.Size =  grp.m_indices.size() * sizeof(uint);
         BufferData IBData;
         IBData.pData    = grp.m_indices.data();
         IBData.DataSize = grp.m_indices.size() * sizeof (uint);// AVOID THIS PLEEEASE
@@ -96,8 +101,15 @@ Mesh::Group Mesh::loadGroupFrom(const aiMesh& mesh, const aiScene *pScene)
         v.m_normal.y = mesh.mNormals[i].y;
         v.m_normal.z = mesh.mNormals[i].z;
 
-        v.m_uv.x = mesh.mTextureCoords[0][i].x;
-        v.m_uv.y = mesh.mTextureCoords[0][i].y;
+        //this query whether we have UV0
+        if(mesh.HasTextureCoords(0))
+        {
+            v.m_uv.x = mesh.mTextureCoords[0][i].x;
+            v.m_uv.y = mesh.mTextureCoords[0][i].y;
+        }
+        else
+            //this is called for cerberus as well, it SHOULDN'T
+            v.m_uv.x = v.m_uv.y = 0;
 
         group.m_vertices.emplace_back(v);
     }
@@ -127,7 +139,7 @@ Mesh::Group Mesh::loadGroupFrom(const aiMesh& mesh, const aiScene *pScene)
 
                 if(mat->GetTexture(type, i, &texPath) == aiReturn_SUCCESS)
                 {
-                    std::string str = texPath.C_Str();
+                    eastl::string str = texPath.C_Str();
                     addTexture(str, group);
                 }
             }
@@ -137,16 +149,16 @@ Mesh::Group Mesh::loadGroupFrom(const aiMesh& mesh, const aiScene *pScene)
     return group;
 }
 
-void Mesh::addTexture(std::string& _path, Group& _group)
+void Mesh::addTexture(eastl::string& _path, Group& _group)
 {
-    std::string pathToTex = m_path + _path;
+    eastl::string pathToTex = m_path + _path;
 
     RefCntAutoPtr<ITexture> tex;
 
     if(m_texturesLoaded.find(pathToTex) != m_texturesLoaded.end())
     {
         tex = m_texturesLoaded[pathToTex];
-        std::cout << "Loading " << _path << " Tex" << std::endl;
+        std::cout << "Found the texture... loading " << _path.c_str() << " Tex" << std::endl;
     }
     else
     {
@@ -155,11 +167,11 @@ void Mesh::addTexture(std::string& _path, Group& _group)
 
         TextureLoadInfo info;
         info.Name = _path.c_str();
-        info.IsSRGB = pathToTex.find("_A") != std::string::npos;
+        info.IsSRGB = pathToTex.find("_A") != eastl::string::npos;
 
-        CreateTextureFromFile(pathToTex.c_str(), info, m_device, &tex);
+       // CreateTextureFromFile(pathToTex.c_str(), info, m_device, &tex);
 
-        if(!tex)
+      //  if(!tex)
         {
             TextureDesc desc;
             desc.Name = _path.c_str();
@@ -168,7 +180,7 @@ void Mesh::addTexture(std::string& _path, Group& _group)
             desc.Type = Diligent::RESOURCE_DIM_TEX_2D;
             desc.BindFlags = Diligent::BIND_SHADER_RESOURCE;
 
-            desc.Format = pathToTex.find("_A") != std::string::npos ? Diligent::TEX_FORMAT_RGBA8_UNORM_SRGB
+            desc.Format = pathToTex.find("_A") != eastl::string::npos ? Diligent::TEX_FORMAT_RGBA8_UNORM_SRGB
                     : Diligent::TEX_FORMAT_RGBA8_UNORM;
 
             int x, y, chnls;
@@ -187,34 +199,51 @@ void Mesh::addTexture(std::string& _path, Group& _group)
         }
 
         m_texturesLoaded[pathToTex] = tex;
-        std::cout << "Creating " << _path << " Tex" << std::endl;
+        std::cout << "Creating " << _path.c_str() << " Tex" << std::endl;
     }
 
     _group.m_textures.emplace_back(tex);
 }
 
-void Mesh::addTexture(std::string &_path, int index)
+void Mesh::addTexture(eastl::string &_path, int index)
 {
     addTexture(_path, m_meshes[index]);
 }
 
-void Mesh::draw(RefCntAutoPtr<IDeviceContext> _context, RefCntAutoPtr<IShaderResourceBinding> _srb, FirstPersonCamera& _camera
-, RefCntAutoPtr<IBuffer>& _bufferMatrices)
+void Mesh::draw(RefCntAutoPtr<IDeviceContext> _context, IShaderResourceBinding* _srb, FirstPersonCamera& _camera
+, RefCntAutoPtr<IBuffer> _bufferMatrices, eastl::unordered_map<eastl::string, RefCntAutoPtr<ITexture>>& _defaultTextures)
 {
 
-    // Map the buffer and write current world-view-projection matrix
-    MapHelper<float4x4> CBConstants(_context, _bufferMatrices, MAP_WRITE, MAP_FLAG_DISCARD);
-    *CBConstants = (m_model * _camera.GetViewMatrix() * _camera.GetProjMatrix()).Transpose();
+    {
+        // Map the buffer and write current world-view-projection matrix
+        MapHelper<float4x4> CBConstants(_context, _bufferMatrices, MAP_WRITE, MAP_FLAG_DISCARD);
+        *CBConstants = (m_model * _camera.GetViewMatrix() * _camera.GetProjMatrix()).Transpose();
+    }
+
 
     for (Group& grp : m_meshes)
     {
-        _srb->GetVariableByName(SHADER_TYPE_PIXEL, "g_TextureAlbedo")->
-                Set(grp.m_textures[0]->GetDefaultView(TEXTURE_VIEW_SHADER_RESOURCE));
+        if(grp.m_textures.empty())
+        {
+            _srb->GetVariableByName(SHADER_TYPE_PIXEL, "g_TextureAlbedo")->
+            Set(_defaultTextures["albedo"]->GetDefaultView(Diligent::TEXTURE_VIEW_SHADER_RESOURCE));
 
-        _srb->GetVariableByName(SHADER_TYPE_PIXEL, "g_TextureNormal")->
-                Set(grp.m_textures[1]->GetDefaultView(TEXTURE_VIEW_SHADER_RESOURCE));
+            _srb->GetVariableByName(SHADER_TYPE_PIXEL, "g_TextureNormal")->
+                    Set(_defaultTextures["normal"]->GetDefaultView(Diligent::TEXTURE_VIEW_SHADER_RESOURCE));
+        }
+        else
+        {
+            _srb->GetVariableByName(SHADER_TYPE_PIXEL, "g_TextureAlbedo")->
+                    Set(grp.m_textures[0]->GetDefaultView(TEXTURE_VIEW_SHADER_RESOURCE));
 
-        Uint32   offset   = 0;
+            if(grp.m_textures.size() > 1)
+            {
+                _srb->GetVariableByName(SHADER_TYPE_PIXEL, "g_TextureNormal")->
+                        Set(grp.m_textures[1]->GetDefaultView(TEXTURE_VIEW_SHADER_RESOURCE));
+            }
+        }
+
+        Uint64  offset = 0;
         IBuffer* pBuffs[] = {grp.m_meshVertexBuffer};
         _context->SetVertexBuffers(0, 1, pBuffs, &offset, RESOURCE_STATE_TRANSITION_MODE_TRANSITION,
                                              SET_VERTEX_BUFFERS_FLAG_RESET);
@@ -231,5 +260,32 @@ void Mesh::draw(RefCntAutoPtr<IDeviceContext> _context, RefCntAutoPtr<IShaderRes
         // render targets and correctness of draw command arguments
         DrawAttrs.Flags = DRAW_FLAG_VERIFY_ALL;
         _context->DrawIndexed(DrawAttrs);
+    }
+}
+
+void Mesh::drawInspector()
+{
+    static bool hasChanged = false;
+    ImGui::PushID(m_path.c_str());
+    ImGui::Text("%s", m_path.c_str());
+        if(ImGui::DragFloat3("Translation", m_position.Data()))
+        {
+            hasChanged = true;
+        }
+        if(ImGui::DragFloat3("Scale", m_scale.Data()))
+        {
+            hasChanged = true;
+        }
+        if(ImGui::DragFloat3("Rotation", m_angle.Data()))
+        {
+            hasChanged = true;
+            //UPDATE QUATERNION
+        }
+    ImGui::PopID();
+    if(hasChanged)
+    {
+        //Update matrix
+        m_model = float4x4::Scale(m_scale) * m_rotation.ToMatrix() * float4x4::Translation(m_position);
+
     }
 }

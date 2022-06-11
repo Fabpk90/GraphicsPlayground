@@ -82,7 +82,7 @@ void FirstPersonCamera::Update(InputController& Controller, float ElapsedTime)
 
         float fYawDelta   = MouseDeltaX * m_fRotationSpeed;
         float fPitchDelta = MouseDeltaY * m_fRotationSpeed;
-        if (mouseState.ButtonFlags & MouseState::BUTTON_FLAG_LEFT)
+        if (mouseState.ButtonFlags & MouseState::BUTTON_FLAG_RIGHT)
         {
             m_fYawAngle += fYawDelta * -m_fHandness;
             m_fPitchAngle += fPitchDelta * -m_fHandness;

@@ -7,13 +7,13 @@
 
 #define PLATFORM_WIN32 1
 
-#include <diligent/include/Common/interface/BasicMath.hpp>
 #include <assimp/scene.h>
-#include <diligent/include/Graphics/GraphicsEngine/interface/Texture.h>
-#include <diligent/include/Common/interface/RefCntAutoPtr.hpp>
-#include <diligent/include/Graphics/GraphicsEngine/interface/ShaderResourceBinding.h>
-#include <diligent/include/Graphics/GraphicsEngine/interface/RenderDevice.h>
+#include <EASTL/string.h>
+#include <EASTL/vector.h>
+#include <EASTL/unordered_map.h>
 #include "FirstPersonCamera.hpp"
+#include "RenderDevice.h"
+#include "Common/interface/RefCntAutoPtr.hpp"
 
 using namespace Diligent;
 
@@ -27,9 +27,9 @@ struct Vertex
 class Mesh {
     struct Group
     {
-        std::vector<Vertex> m_vertices;
-        std::vector<uint> m_indices;
-        std::vector<RefCntAutoPtr<ITexture>> m_textures;
+        eastl::vector<Vertex> m_vertices;
+        eastl::vector<uint> m_indices;
+        eastl::vector<RefCntAutoPtr<ITexture>> m_textures;
 
         //This is not really optimal, as the data doesn't need to be both on CPU AND GPU
         RefCntAutoPtr<IBuffer> m_meshVertexBuffer;
@@ -37,20 +37,24 @@ class Mesh {
     };
 
 public:
-    Mesh(RefCntAutoPtr<IRenderDevice> _device, const char* _path, float3 _position = float3(0), float3 _scale = float3(1));
+    Mesh(RefCntAutoPtr<IRenderDevice> _device, const char* _path, float3 _position = float3(0), float3 _scale = float3(1)
+            , float3 _angle = float3(0.0f));
 
     Group& getGroup() { return m_meshes[0];}
 
     void addTexture(const char* _path, int index)
     {
-        std::string str = _path;
+        eastl::string str = _path;
         addTexture(str, index);
     }
-    void addTexture(std::string& _path, Group& _group);
-    void addTexture(std::string& _path, int index);
+    void addTexture(eastl::string& _path, Group& _group);
+    void addTexture(eastl::string& _path, int index);
 
-    void draw(RefCntAutoPtr<IDeviceContext> _context, RefCntAutoPtr<IShaderResourceBinding> _srb, FirstPersonCamera& _camera,
-              RefCntAutoPtr<IBuffer>& _bufferMatrices);
+    void draw(RefCntAutoPtr<IDeviceContext> _context, IShaderResourceBinding* _srb, FirstPersonCamera &_camera,
+         RefCntAutoPtr<IBuffer> _bufferMatrices,
+         eastl::unordered_map<eastl::string, RefCntAutoPtr<ITexture>> &_defaultTextures);
+
+    void drawInspector();
 
     float4x4& getModel() { return m_model;}
 
@@ -58,14 +62,17 @@ private:
     float4x4 m_model;
     float3 m_position;
     float3 m_scale;
+    float3 m_angle;
+
+    Quaternion m_rotation;
 
     RefCntAutoPtr<IRenderDevice> m_device;
 
-    std::string m_path;
+    eastl::string m_path;
 
-    std::vector<Group> m_meshes;
+    eastl::vector<Group> m_meshes;
 
-    std::unordered_map<std::string, RefCntAutoPtr<ITexture>> m_texturesLoaded;
+    eastl::unordered_map<eastl::string, RefCntAutoPtr<ITexture>> m_texturesLoaded;
 
     void recursivelyLoadNode(aiNode *pNode, const aiScene *pScene);
 

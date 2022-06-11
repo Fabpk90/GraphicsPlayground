@@ -27,9 +27,10 @@
 
 #pragma once
 
-#include <diligent/include/Common/interface/BasicMath.hpp>
-#include <diligent/include/Graphics/GraphicsEngine/interface/GraphicsTypes.h>
+
 #include "InputController.hpp"
+#include "Common/interface/BasicMath.hpp"
+#include "GraphicsTypes.h"
 
 namespace Diligent
 {
