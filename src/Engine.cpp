@@ -129,9 +129,9 @@ void Engine::createResources()
             LayoutElement (2, 0, 2, VT_FLOAT32, False)
     };
 
-    eastl::vector<PipelineState::StaticVarsStruct> vars = { {SHADER_TYPE_VERTEX, "Constants", m_bufferMatrixMesh} };
+    eastl::vector<PipelineState::VarStruct> vars = {{SHADER_TYPE_VERTEX, "Constants", m_bufferMatrixMesh} };
 
-    m_pipelines[PSO_GBUFFER] = eastl::make_unique<PipelineState>(m_device, "Simple Mesh PSO", PIPELINE_TYPE_GRAPHICS, "gbuffer", vars
+    m_pipelines[PSO_GBUFFER] = eastl::make_unique<PipelineState>(m_device, "Simple Mesh PSO", PIPELINE_TYPE_GRAPHICS, "gbuffer", vars, eastl::vector<PipelineState::VarStruct>()
                                                                , desc, layoutElements);
 
     m_camera.SetPos(float3(0, 0, -20));
@@ -140,11 +140,24 @@ void Engine::createResources()
     createLightingPipeline();
     createTransparencyPipeline();
 
-    m_meshes.push_back(new Mesh(m_device, "mesh/Bunny/stanford-bunny.obj"));
-    m_meshes.push_back(new Mesh(m_device, "mesh/cerberus/Cerberus_LP.fbx"));
-    //  m_meshes.push_back(new Mesh(m_device, "mesh/Sponza/Sponza.fbx"));
-    m_meshes[1]->getModel() *= float4x4::Translation(0, 0, 10);
-    m_meshes[1]->addTexture("Textures/Cerberus_N.tga", 0);
+    m_meshes.resize(3, nullptr);
+
+    m_executor.silent_async([&](){
+        m_meshes[0] = new Mesh(m_device, "mesh/Bunny/stanford-bunny.obj");
+    });
+
+    m_executor.silent_async([&](){
+        m_meshes[1] = new Mesh(m_device, "mesh/cerberus/Cerberus_LP.fbx", true);
+
+        m_meshes[1]->getModel() *= float4x4::Translation(0, 0, 10);
+        m_meshes[1]->addTexture("Textures/Cerberus_N.tga", 0);
+
+        m_meshes[1]->setIsLoaded(true);
+    });
+
+    m_executor.silent_async([&](){
+        // m_meshes[2] = new Mesh(m_device, "mesh/Sponza/Sponza.fbx");
+    });
 }
 
 void Engine::render()
@@ -183,10 +196,14 @@ void Engine::render()
 
     for(Mesh* m : m_meshes)
     {
-        m->draw(m_immediateContext, &psoFinal->getSRB(), m_camera, m_bufferMatrixMesh, m_defaultTextures);
+        if(m && m->isLoaded())
+        {
+            m->draw(m_immediateContext, &psoFinal->getSRB(), m_camera, m_bufferMatrixMesh, m_defaultTextures);
+        }
     }
 
     renderLighting();
+    renderTransparency();
 
     CopyTextureAttribs attribs;
     attribs.pDstTexture = m_swapChain->GetCurrentBackBufferRTV()->GetTexture();
@@ -204,6 +221,8 @@ void Engine::render()
 
     endCollectingStats();
     uiPass();
+
+    FrameMark;
 }
 
 void Engine::uiPass()
@@ -215,7 +234,10 @@ void Engine::uiPass()
 
     for(Mesh* m : m_meshes)
     {
-        m->drawInspector();
+        if(m && m->isLoaded())
+        {
+            m->drawInspector();
+        }
     }
     ImGui::End();
 
@@ -237,6 +259,9 @@ void Engine::uiPass()
     ImGui::End();
 
     showStats();
+
+    showFrameTimeGraph();
+
     m_imguiRenderer->Render(m_immediateContext);
 }
 
@@ -257,24 +282,16 @@ void Engine::createLightingPipeline()
     cbDesc.Size = sizeof(Constants);
     m_device->CreateBuffer(cbDesc, nullptr, &m_bufferLighting);
 
-    eastl::vector<PipelineState::StaticVarsStruct> vars = { {SHADER_TYPE_COMPUTE, "Constants", m_bufferLighting} };
+    eastl::vector<PipelineState::VarStruct> staticVars = {{SHADER_TYPE_COMPUTE, "Constants", m_bufferLighting}};
+    eastl::vector<PipelineState::VarStruct> dynamicVars =
+    {
+        {SHADER_TYPE_COMPUTE, "g_color", m_gbuffer->GetTextureType(GBuffer::EGBufferType::Albedo)->GetDefaultView(Diligent::TEXTURE_VIEW_SHADER_RESOURCE)},
+        {SHADER_TYPE_COMPUTE, "g_normal",m_gbuffer->GetTextureType(GBuffer::EGBufferType::Normal)->GetDefaultView(Diligent::TEXTURE_VIEW_SHADER_RESOURCE)},
+        {SHADER_TYPE_COMPUTE, "g_depth", m_gbuffer->GetTextureType(GBuffer::EGBufferType::Depth)->GetDefaultView(Diligent::TEXTURE_VIEW_SHADER_RESOURCE)},
+        {SHADER_TYPE_COMPUTE, "g_output", m_gbuffer->GetTextureType(GBuffer::EGBufferType::Output)->GetDefaultView(Diligent::TEXTURE_VIEW_UNORDERED_ACCESS)}
+    };
 
-    m_pipelines[PSO_LIGHTING] = eastl::make_unique<PipelineState>(m_device, "Compute Lighting PSO", PIPELINE_TYPE_COMPUTE, "lighting", vars);
-    auto& psoLighting = m_pipelines[PSO_LIGHTING];
-    auto& srb = psoLighting->getSRB();
-
-    srb.GetVariableByName(SHADER_TYPE_COMPUTE, "g_color")
-            ->Set(m_gbuffer->GetTextureType(GBuffer::EGBufferType::Albedo)->GetDefaultView(Diligent::TEXTURE_VIEW_SHADER_RESOURCE));
-
-    srb.GetVariableByName(SHADER_TYPE_COMPUTE, "g_normal")
-    ->Set(m_gbuffer->GetTextureType(GBuffer::EGBufferType::Normal)->GetDefaultView(Diligent::TEXTURE_VIEW_SHADER_RESOURCE));
-
-    srb.GetVariableByName(SHADER_TYPE_COMPUTE, "g_depth")
-            ->Set(m_gbuffer->GetTextureType(GBuffer::EGBufferType::Depth)->GetDefaultView(Diligent::TEXTURE_VIEW_SHADER_RESOURCE));
-
-    //todo: change this when resizing (maybe a callback system for resize event ?)
-    srb.GetVariableByName(SHADER_TYPE_COMPUTE, "g_output")
-    ->Set(m_gbuffer->GetTextureType(GBuffer::EGBufferType::Output)->GetDefaultView(Diligent::TEXTURE_VIEW_UNORDERED_ACCESS));
+    m_pipelines[PSO_LIGHTING] = eastl::make_unique<PipelineState>(m_device, "Compute Lighting PSO", PIPELINE_TYPE_COMPUTE, "lighting", staticVars, dynamicVars);
 }
 
 void Engine::renderLighting()
@@ -480,8 +497,9 @@ void Engine::createDefaultTextures()
 void Engine::createTransparencyPipeline()
 {
     GraphicsPipelineDesc desc;
-    desc.NumRenderTargets             = 1;
+    desc.NumRenderTargets             = 2;
     desc.RTVFormats[0]                = m_swapChain->GetDesc().ColorBufferFormat;
+    desc.RTVFormats[1]                = Diligent::TEX_FORMAT_R8_UNORM;
     desc.DSVFormat                    = m_swapChain->GetDesc().DepthBufferFormat;
     desc.PrimitiveTopology            = PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
     desc.RasterizerDesc.CullMode      = Diligent::CULL_MODE_BACK;
@@ -489,15 +507,66 @@ void Engine::createTransparencyPipeline()
     desc.BlendDesc.RenderTargets[0].BlendEnable = True;
     desc.BlendDesc.RenderTargets[0].BlendOp = Diligent::BLEND_OPERATION_ADD;
 
-    desc.BlendDesc.RenderTargets[0].SrcBlend = Diligent::BLEND_FACTOR_SRC1_ALPHA;
-    //desc.BlendDesc.RenderTargets[0]. = Diligent::BLEND_FACTOR_SRC1_ALPHA;
+    desc.BlendDesc.RenderTargets[0].SrcBlend = Diligent::BLEND_FACTOR_SRC_ALPHA;
+
+    desc.BlendDesc.RenderTargets[0].DestBlend = Diligent::BLEND_FACTOR_INV_SRC_ALPHA;
+
+    desc.BlendDesc.RenderTargets[1].BlendEnable = True;
+    desc.BlendDesc.RenderTargets[1].BlendOp = Diligent::BLEND_OPERATION_ADD;
+
+    desc.BlendDesc.RenderTargets[1].SrcBlend = Diligent::BLEND_FACTOR_SRC_ALPHA;
+
+    desc.BlendDesc.RenderTargets[1].DestBlend = Diligent::BLEND_FACTOR_INV_SRC_ALPHA;
 
     eastl::vector<LayoutElement> layoutElements = {
             LayoutElement(0, 0, 4, Diligent::VT_FLOAT32),
             LayoutElement(1, 0, 2, Diligent::VT_FLOAT32, True)
     };
-    eastl::vector<PipelineState::StaticVarsStruct> vars = { {SHADER_TYPE_VERTEX, "Constants", m_bufferMatrixMesh} };
+    eastl::vector<PipelineState::VarStruct> vars = {{SHADER_TYPE_VERTEX, "Constants", m_bufferMatrixMesh} };
 
-    m_pipelines[PSO_TRANSPARENCY] = eastl::make_unique<PipelineState>(m_device, "Transparency PSO", PIPELINE_TYPE_GRAPHICS, "transparency", vars
-            , desc, layoutElements);
+  //  m_pipelines[PSO_TRANSPARENCY] = eastl::make_unique<PipelineState>(m_device, "Transparency PSO", PIPELINE_TYPE_GRAPHICS, "transparency", vars
+  //          , desc, layoutElements);
+
+}
+
+void Engine::renderTransparency()
+{
+    //OIT
+
+    //clear the rt0 to 0 and rt 1 to 1
+}
+
+void Engine::showFrameTimeGraph()
+{
+  /*  const float width = ImGui::GetWindowWidth();
+    const size_t frameCount = m_FrameTimeHistory.GetCount();
+    if(width > 0.f && frameCount > 0)
+    {
+        ImDrawList* drawList = ImGui::GetWindowDrawList();
+        ImVec2 basePos = ImGui::GetCursorScreenPos();
+        constexpr float minHeight = 2.f;
+        constexpr float maxHeight = 64.f;
+        float endX = width;
+        constexpr float dtMin = 1.f / 120.f;
+        constexpr float dtMax = 1.f / 15.f;
+        const float dtMin_Log2 = log2(dtMin);
+        const float dtMax_Log2 = log2(dtMax);
+        drawList->AddRectFilled(basePos, ImVec2(basePos.x + width, basePos.y + maxHeight), 0xFF404040);
+        for(size_t frameIndex = 0; frameIndex < frameCount && endX > 0.f; ++frameIndex)
+        {
+            const FrameTimeHistory::Entry dt = m_FrameTimeHistory.Get(frameIndex);
+            const float frameWidth = dt.m_DT / dtMin;
+            const float frameHeightFactor = (dt.m_DT_Log2 - dtMin_Log2) / (dtMax_Log2 - dtMin_Log2);
+            const float frameHeightFactor_Nrm = std::min(std::max(0.f, frameHeightFactor), 1.f);
+            const float frameHeight = glm::mix(minHeight, maxHeight, frameHeightFactor_Nrm);
+            const float begX = endX - frameWidth;
+            const uint32_t color = glm::packUnorm4x8(DeltaTimeToColor(dt.m_DT));
+            drawList->AddRectFilled(
+                    ImVec2(basePos.x + std::max(0.f, floor(begX)), basePos.y + maxHeight - frameHeight),
+                    ImVec2(basePos.x + ceil(endX), basePos.y + maxHeight),
+                    color);
+            endX = begX;
+        }
+        ImGui::Dummy(ImVec2(width, maxHeight));
+    }*/
 }

@@ -5,10 +5,11 @@
 #include "PipelineState.hpp"
 #include "Tracy.hpp"
 
-PipelineState::PipelineState(RefCntAutoPtr<IRenderDevice> _device, const char* _name, PIPELINE_TYPE _type, const char* _shaderPath, eastl::vector<StaticVarsStruct> _vars,  GraphicsPipelineDesc _graphicsDesc
+PipelineState::PipelineState(RefCntAutoPtr<IRenderDevice> _device, const char* _name, PIPELINE_TYPE _type, const char* _shaderPath, eastl::vector<VarStruct> _staticVars, eastl::vector<VarStruct> _dynamicVars
+                             , GraphicsPipelineDesc _graphicsDesc
 , eastl::vector<LayoutElement> _layoutElements)
 : m_device(eastl::move(_device)), m_type(_type), m_layoutElements(eastl::move(_layoutElements))
-, m_vars(eastl::move(_vars))
+, m_staticVars(eastl::move(_staticVars)), m_dynamicVars(eastl::move(_dynamicVars))
 {
     m_pipelineShader.Attach(new Shader(_shaderPath, _type));
     PipelineStateCreateInfo* PSO;
@@ -37,8 +38,6 @@ bool PipelineState::createPipeline(const PIPELINE_TYPE &_type, PipelineStateCrea
 
         m_graphicInfo.pVS = m_pipelineShader->getShaderStage(Shader::EShaderStage::Vertex).RawPtr<IShader>();
         m_graphicInfo.pPS = m_pipelineShader->getShaderStage(Shader::EShaderStage::Pixel).RawPtr<IShader>();
-
-        assert(!m_layoutElements.empty());
 
         m_graphicInfo.GraphicsPipeline.InputLayout.LayoutElements = m_layoutElements.data();
         m_graphicInfo.GraphicsPipeline.InputLayout.NumElements = m_layoutElements.size();
@@ -106,9 +105,9 @@ bool PipelineState::createPipeline(const PIPELINE_TYPE &_type, PipelineStateCrea
         m_device->CreateComputePipelineState(m_computeInfo, &m_pipeline);
     }
 
-    setStaticVars(m_vars);
-
+    setStaticVars(m_staticVars);
     m_pipeline->CreateShaderResourceBinding(&m_SRB, true);
+    setDynamicVars(m_dynamicVars);
 
     return true;
 }
@@ -137,11 +136,27 @@ void PipelineState::reload()
     std::cout << "Correctly reloaded PSO " << PSO->PSODesc.Name << std::endl;
 }
 
-void PipelineState::setStaticVars(const eastl::vector<StaticVarsStruct> &_vars)
+void PipelineState::setStaticVars(const eastl::vector<VarStruct> &_vars)
 {
     for (auto& var : _vars)
     {
-        m_pipeline->GetStaticVariableByName(var.m_type, var.m_name)->Set(var.m_object);
+        //checks if the var is still needed by the shader
+        if(auto* pVar = m_pipeline->GetStaticVariableByName(var.m_type, var.m_name))
+        {
+            pVar->Set(var.m_object);
+        }
+        else
+        {
+            std::cout << "The var" << var.m_name << " is set but not used in the shader" << std::endl;
+        }
+    }
+}
+
+void PipelineState::setDynamicVars(const eastl::vector<VarStruct> &_vars)
+{
+    for (auto& var : _vars)
+    {
+        m_SRB->GetVariableByName(var.m_type, var.m_name)->Set(var.m_object);
     }
 }
 

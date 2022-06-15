@@ -19,19 +19,28 @@ class PipelineState
 {
 public:
 
-    struct StaticVarsStruct
+    struct VarStruct
     {
         SHADER_TYPE m_type;
         const char* m_name;
         IDeviceObject* m_object;
     };
 
-    PipelineState(RefCntAutoPtr<IRenderDevice> _device, const char* _name, PIPELINE_TYPE _type, const char* _shaderPath, eastl::vector<StaticVarsStruct> _vars = {}, GraphicsPipelineDesc _graphicsDesc = {}
-    , eastl::vector<LayoutElement> _layoutElements = {});
+    PipelineState(RefCntAutoPtr<IRenderDevice> _device, const char* _name, PIPELINE_TYPE _type, const char* _shaderPath, eastl::vector<VarStruct> _staticVars = {}
+    , eastl::vector<VarStruct> _dynamicVars = {}, GraphicsPipelineDesc _graphicsDesc = {}, eastl::vector<LayoutElement> _layoutElements = {});
 
     ~PipelineState();
 
-    void setStaticVars(const eastl::vector<StaticVarsStruct>& _vars );
+    void setStaticVars(const eastl::vector<VarStruct>& _vars );
+    void setDynamicVars(const eastl::vector<VarStruct>& _vars );
+
+    inline void setShaderResource(SHADER_TYPE _type, const char* _name, IDeviceObject* _object)
+    {
+        if(auto* pVar = m_SRB->GetVariableByName(_type, _name))
+        {
+            pVar->Set(_object);
+        }
+    }
 
     void reload();
 
@@ -55,7 +64,9 @@ private:
     RefCntAutoPtr<IPipelineState> m_pipeline;
     eastl::vector<IShader*> m_shaderStages;
     RefCntAutoPtr<IShaderResourceBinding> m_SRB;
-    eastl::vector<StaticVarsStruct> m_vars;
+
+    eastl::vector<VarStruct> m_staticVars;
+    eastl::vector<VarStruct> m_dynamicVars;
 
     bool createPipeline(const PIPELINE_TYPE &_type, PipelineStateCreateInfo *PSO);
 };

@@ -14,6 +14,8 @@
 #include "FirstPersonCamera.hpp"
 #include "RenderDevice.h"
 #include "Common/interface/RefCntAutoPtr.hpp"
+#include "taskflow/core/executor.hpp"
+#include "taskflow/taskflow.hpp"
 
 using namespace Diligent;
 
@@ -27,9 +29,9 @@ struct Vertex
 class Mesh {
     struct Group
     {
-        eastl::vector<Vertex> m_vertices;
-        eastl::vector<uint> m_indices;
-        eastl::vector<RefCntAutoPtr<ITexture>> m_textures;
+        std::vector<Vertex> m_vertices;
+        std::vector<uint> m_indices;
+        std::vector<RefCntAutoPtr<ITexture>> m_textures;
 
         //This is not really optimal, as the data doesn't need to be both on CPU AND GPU
         RefCntAutoPtr<IBuffer> m_meshVertexBuffer;
@@ -37,16 +39,16 @@ class Mesh {
     };
 
 public:
-    Mesh(RefCntAutoPtr<IRenderDevice> _device, const char* _path, float3 _position = float3(0), float3 _scale = float3(1)
+    Mesh(RefCntAutoPtr<IRenderDevice> _device, const char* _path, bool _needsAfterLoadedActions = false, float3 _position = float3(0), float3 _scale = float3(1)
             , float3 _angle = float3(0.0f));
-
-    Group& getGroup() { return m_meshes[0];}
 
     void addTexture(const char* _path, int index)
     {
         eastl::string str = _path;
         addTexture(str, index);
     }
+
+    //todo: make a string_view version of this
     void addTexture(eastl::string& _path, Group& _group);
     void addTexture(eastl::string& _path, int index);
 
@@ -58,7 +60,16 @@ public:
 
     float4x4& getModel() { return m_model;}
 
+    [[nodiscard]] bool isLoaded() const { return m_isLoaded; }
+    void setIsLoaded(bool _isLoaded) { m_isLoaded = _isLoaded;}
+
 private:
+
+    bool m_isLoaded;
+
+    tf::Executor m_executor;
+    tf::Taskflow m_taskflow;
+
     float4x4 m_model;
     float3 m_position;
     float3 m_scale;

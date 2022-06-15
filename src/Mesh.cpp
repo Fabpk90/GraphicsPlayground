@@ -9,16 +9,16 @@
 #include "Tracy.hpp"
 #include <fstream>
 #include <assimp/Importer.hpp>
-#include <utility>
 #include <assimp/postprocess.h>
 #include <stb/stb_image.h>
 
 using namespace Diligent;
 
-Mesh::Mesh(RefCntAutoPtr<IRenderDevice> _device, const char *_path, float3 _position, float3 _scale, float3 _angle)
+Mesh::Mesh(RefCntAutoPtr<IRenderDevice> _device, const char *_path,bool _needsAfterLoadedActions, float3 _position, float3 _scale, float3 _angle)
 : m_path(_path), m_position(_position), m_scale(_scale), m_device(eastl::move(_device)), m_angle(_angle)
 {
-    ZoneScopedN("Load Mesh");
+    ZoneScopedN("Loading Mesh");
+    ZoneText(m_path.c_str(), m_path.size());
     m_model = float4x4::Scale(m_scale) * float4x4::Translation(m_position);
 
     auto index = m_path.find_last_of('/') + 1; // +1 to include the /
@@ -65,7 +65,7 @@ Mesh::Mesh(RefCntAutoPtr<IRenderDevice> _device, const char *_path, float3 _posi
         m_device->CreateBuffer(IndexBuffDesc, &IBData, &grp.m_meshIndexBuffer);
     }
 
-
+    m_isLoaded = !_needsAfterLoadedActions;
 }
 
 void Mesh::recursivelyLoadNode(aiNode *pNode, const aiScene *pScene)
@@ -89,62 +89,77 @@ Mesh::Group Mesh::loadGroupFrom(const aiMesh& mesh, const aiScene *pScene)
     group.m_vertices.reserve(mesh.mNumVertices);
     group.m_indices.reserve(mesh.mNumFaces);
 
-    for(int i = 0; i < mesh.mNumVertices; ++i)
-    {
-        Vertex v{};
+      m_executor.silent_async([&](){
+          ZoneScopedN("Loading Vertices");
 
-        v.m_position.x = mesh.mVertices[i].x;
-        v.m_position.y = mesh.mVertices[i].y;
-        v.m_position.z = mesh.mVertices[i].z;
-
-        v.m_normal.x = mesh.mNormals[i].x;
-        v.m_normal.y = mesh.mNormals[i].y;
-        v.m_normal.z = mesh.mNormals[i].z;
-
-        //this query whether we have UV0
-        if(mesh.HasTextureCoords(0))
-        {
-            v.m_uv.x = mesh.mTextureCoords[0][i].x;
-            v.m_uv.y = mesh.mTextureCoords[0][i].y;
-        }
-        else
-            //this is called for cerberus as well, it SHOULDN'T
-            v.m_uv.x = v.m_uv.y = 0;
-
-        group.m_vertices.emplace_back(v);
-    }
-
-    for (int i = 0; i < mesh.mNumFaces; ++i)
-    {
-        auto& face = mesh.mFaces[i];
-
-        for (int j = 0; j < face.mNumIndices; ++j)
-        {
-            group.m_indices.emplace_back(face.mIndices[j]);
-        }
-    }
-
-    //we handle only one material per mesh for now
-    if(mesh.mMaterialIndex >= 0)
-    {
-        auto mat = pScene->mMaterials[mesh.mMaterialIndex];
-
-        for(int typeID = 1; typeID < aiTextureType_UNKNOWN; ++typeID)
-        {
-            auto type = static_cast<aiTextureType>(typeID);
-
-            for (int i = 0; i < mat->GetTextureCount(type); ++i)
+          ZoneText(m_path.c_str(), m_path.size());
+            for(int i = 0; i < mesh.mNumVertices; ++i)
             {
-                aiString texPath;
+                Vertex v{};
 
-                if(mat->GetTexture(type, i, &texPath) == aiReturn_SUCCESS)
+                v.m_position.x = mesh.mVertices[i].x;
+                v.m_position.y = mesh.mVertices[i].y;
+                v.m_position.z = mesh.mVertices[i].z;
+
+                v.m_normal.x = mesh.mNormals[i].x;
+                v.m_normal.y = mesh.mNormals[i].y;
+                v.m_normal.z = mesh.mNormals[i].z;
+
+                //this query whether we have UV0
+                if(mesh.HasTextureCoords(0))
                 {
-                    eastl::string str = texPath.C_Str();
-                    addTexture(str, group);
+                    v.m_uv.x = mesh.mTextureCoords[0][i].x;
+                    v.m_uv.y = mesh.mTextureCoords[0][i].y;
+                }
+                else
+                    //this is called for cerberus as well, it SHOULDN'T
+                    v.m_uv.x = v.m_uv.y = 0;
+
+                group.m_vertices.emplace_back(v);
+            }
+        });
+
+      m_executor.silent_async([&](){
+          ZoneScopedN("Loading Indices");
+          ZoneText(m_path.c_str(), m_path.size());
+            for (int i = 0; i < mesh.mNumFaces; ++i)
+            {
+                auto& face = mesh.mFaces[i];
+
+                for (int j = 0; j < face.mNumIndices; ++j)
+                {
+                    group.m_indices.emplace_back(face.mIndices[j]);
                 }
             }
-        }
-    }
+        });
+
+      m_executor.silent_async([&](){
+          ZoneScopedN("Loading Textures");
+          ZoneText(m_path.c_str(), m_path.size());
+            //we handle only one material per mesh for now
+            if(mesh.mMaterialIndex >= 0)
+            {
+                auto mat = pScene->mMaterials[mesh.mMaterialIndex];
+
+                for(int typeID = 1; typeID < aiTextureType_UNKNOWN; ++typeID)
+                {
+                    auto type = static_cast<aiTextureType>(typeID);
+
+                    for (int i = 0; i < mat->GetTextureCount(type); ++i)
+                    {
+                        aiString texPath;
+
+                        if(mat->GetTexture(type, i, &texPath) == aiReturn_SUCCESS)
+                        {
+                            eastl::string str = texPath.C_Str();
+                            addTexture(str, group);
+                        }
+                    }
+                }
+            }
+        });
+
+      m_executor.wait_for_all();
 
     return group;
 }

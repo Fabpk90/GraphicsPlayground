@@ -22,6 +22,8 @@ add_subdirectory(external/DiligentTools)
 add_subdirectory(external/mimalloc)
 include_directories(external/mimalloc/include)
 
+include_directories(external/taskflow/)
+
 file(GLOB_RECURSE ENGINE_SOURCES src/*.cpp src/*.c)
 file(GLOB_RECURSE ENGINE_HEADERS external/*.h external/*.hpp external/*.inl src/*.hpp)
 
@@ -39,11 +41,18 @@ target_include_directories(GraphicsPlayground PRIVATE "DiligentTools")
 find_package(Vulkan)
 find_package(EASTL CONFIG REQUIRED)
 #find_package(assimp CONFIG REQUIRED)
+IF(${RETAIL})
+    #add_definitions(-D FINAL 1)
+    option(TRACY_ENABLE "" OFF)
+    #option(TRACY_ON_DEMAND "" OFF)
+else()
+    #set options before add_subdirectory#available options: TRACY_ENABLE , TRACY_ON_DEMAND , TRACY_NO_BROADCAST ,TRACY_NO_CODE_TRANSFER , ...
+    option(TRACY_ENABLE "" ON)
+    option(TRACY_ON_DEMAND "" ON)
+      # target: TracyClientoralias Tracy::TracyClient
+endif()
 
-#set options before add_subdirectory#available options: TRACY_ENABLE , TRACY_ON_DEMAND , TRACY_NO_BROADCAST ,TRACY_NO_CODE_TRANSFER , ...
-option(TRACY_ENABLE "" ON)
-option(TRACY_ON_DEMAND "" ON)
-add_subdirectory(external/Tracy)  # target: TracyClientoralias Tracy::TracyClient
+add_subdirectory(external/Tracy)
 
 IF(${CMAKE_BUILD_TYPE} MATCHES Debug)
     target_link_libraries(GraphicsPlayground assimp/assimp-vc143-mtd

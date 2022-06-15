@@ -12,6 +12,8 @@
 #include <EASTL/unique_ptr.h>
 #include <EASTL/unordered_map.h>
 
+#include <taskflow/taskflow.hpp>
+
 #include "Mesh.h"
 #include "FirstPersonCamera.hpp"
 #include "Common/interface/BasicMath.hpp"
@@ -164,10 +166,17 @@ private:
     //TODO: we *could* hash the string to have a faster search, but since it's a few elements it shouldn't matter
     eastl::unordered_map<eastl::string, RefCntAutoPtr<ITexture>> m_defaultTextures;
 
+    tf::Executor m_executor;
+    tf::Taskflow m_taskflow;
+
     void createDefaultTextures();
     void uiPass();
 
     void createTransparencyPipeline();
+
+    void showFrameTimeGraph();
+
+    void renderTransparency();
 };
 
 

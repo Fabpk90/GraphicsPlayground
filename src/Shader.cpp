@@ -30,7 +30,7 @@ bool Shader::reload()
         {
             m_info.Desc.ShaderType = SHADER_TYPE_VERTEX;
             m_info.EntryPoint = "main";
-            m_info.Desc.Name = "Mesh vertex shader";
+            m_info.Desc.Name = path;
             m_info.FilePath = path;
             device->CreateShader(m_info, &pVS);
         }
@@ -41,7 +41,7 @@ bool Shader::reload()
         {
             m_info.Desc.ShaderType = SHADER_TYPE_PIXEL;
             m_info.EntryPoint = "main";
-            m_info.Desc.Name = "Mesh pixel shader";
+            m_info.Desc.Name = path;
             m_info.FilePath = path;
             device->CreateShader(m_info, &pPS);
         }
@@ -63,7 +63,7 @@ bool Shader::reload()
         {
             m_info.Desc.ShaderType = SHADER_TYPE_COMPUTE;
             m_info.EntryPoint = "main";
-            m_info.Desc.Name = "Mesh vertex shader";
+            m_info.Desc.Name = path;
             m_info.FilePath = path;
 
             device->CreateShader(m_info, &pCS);
