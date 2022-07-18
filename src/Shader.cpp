@@ -35,6 +35,9 @@ bool Shader::reload()
             device->CreateShader(m_info, &pVS);
         }
 
+        if(!pVS) return false;
+        std::cout << "Compiled " << path << " successfully" << std::endl;
+
         sprintf_s(path, 512, "%s/ps.hlsl", m_path.data());
         // Create a pixel shader
         RefCntAutoPtr<IShader> pPS;
@@ -46,7 +49,9 @@ bool Shader::reload()
             device->CreateShader(m_info, &pPS);
         }
 
-        if(!pVS || !pPS) return false;
+        if(!pVS) return false;
+
+        std::cout << "Compiled " << path << " successfully" << std::endl;
 
         m_shaders[0] = pVS;
         m_shaders[1] = pPS;
@@ -70,6 +75,8 @@ bool Shader::reload()
         }
 
         if(!pCS) return false;
+
+        std::cout << "Compiled " << path << " successfully" << std::endl;
 
         m_shaders[0] = pCS;
     }

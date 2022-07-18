@@ -16,6 +16,7 @@
 #include "Common/interface/RefCntAutoPtr.hpp"
 #include "taskflow/core/executor.hpp"
 #include "taskflow/taskflow.hpp"
+#include "Common/interface/AdvancedMath.hpp"
 
 using namespace Diligent;
 
@@ -27,11 +28,13 @@ struct Vertex
 };
 
 class Mesh {
+public:
     struct Group
     {
         std::vector<Vertex> m_vertices;
         std::vector<uint> m_indices;
         std::vector<RefCntAutoPtr<ITexture>> m_textures;
+        BoundBox m_aabb;
 
         //This is not really optimal, as the data doesn't need to be both on CPU AND GPU
         RefCntAutoPtr<IBuffer> m_meshVertexBuffer;
@@ -63,9 +66,24 @@ public:
     [[nodiscard]] bool isLoaded() const { return m_isLoaded; }
     void setIsLoaded(bool _isLoaded) { m_isLoaded = _isLoaded;}
 
-private:
+    bool isTransparent() const;
+    void setTransparent(bool mIsTransparent);
 
+    //returns the first group hit
+    bool isClicked(const float4x4& _mvp,
+                   const float3&   RayOrigin,
+                   const float3&   RayDirection,
+                   float&          EnterDist,
+                   float&          ExitDist);
+
+    float3& getTranslation() { return m_position;}
+    float3& getScale() { return m_scale;}
+    float4x4 getRotation() { return m_rotation.ToMatrix();}
+    //void setRotation(const float4x4& _rotation) { m_rotation.MakeQuaternion()}
+
+private:
     bool m_isLoaded;
+    bool m_isTransparent = false;
 
     tf::Executor m_executor;
     tf::Taskflow m_taskflow;
@@ -76,6 +94,9 @@ private:
     float3 m_angle;
 
     Quaternion m_rotation;
+
+    BoundBox m_aabb;
+    bool m_isSelected;
 
     RefCntAutoPtr<IRenderDevice> m_device;
 

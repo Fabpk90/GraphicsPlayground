@@ -11,6 +11,7 @@ PipelineState::PipelineState(RefCntAutoPtr<IRenderDevice> _device, const char* _
 : m_device(eastl::move(_device)), m_type(_type), m_layoutElements(eastl::move(_layoutElements))
 , m_staticVars(eastl::move(_staticVars)), m_dynamicVars(eastl::move(_dynamicVars))
 {
+    ZoneScopedN("Load Pipeline");
     m_pipelineShader.Attach(new Shader(_shaderPath, _type));
     PipelineStateCreateInfo* PSO;
 
@@ -31,13 +32,14 @@ PipelineState::PipelineState(RefCntAutoPtr<IRenderDevice> _device, const char* _
 
 bool PipelineState::createPipeline(const PIPELINE_TYPE &_type, PipelineStateCreateInfo *PSO)
 {
-    ZoneScopedN("Load Pipeline");
     if(_type == PIPELINE_TYPE_GRAPHICS)
     {
         m_type = PIPELINE_TYPE_GRAPHICS;
 
         m_graphicInfo.pVS = m_pipelineShader->getShaderStage(Shader::EShaderStage::Vertex).RawPtr<IShader>();
         m_graphicInfo.pPS = m_pipelineShader->getShaderStage(Shader::EShaderStage::Pixel).RawPtr<IShader>();
+
+        assert(m_graphicInfo.pVS && m_graphicInfo.pPS);
 
         m_graphicInfo.GraphicsPipeline.InputLayout.LayoutElements = m_layoutElements.data();
         m_graphicInfo.GraphicsPipeline.InputLayout.NumElements = m_layoutElements.size();
@@ -116,6 +118,8 @@ void PipelineState::reload()
 {
     if(!m_pipelineShader->reload()) return;
 
+    ZoneScopedN("Reload Pipeline");
+
     m_pipeline = RefCntAutoPtr<IPipelineState>();
     m_shaderStages.clear();
 
@@ -156,7 +160,10 @@ void PipelineState::setDynamicVars(const eastl::vector<VarStruct> &_vars)
 {
     for (auto& var : _vars)
     {
-        m_SRB->GetVariableByName(var.m_type, var.m_name)->Set(var.m_object);
+        if(auto* pVar = m_SRB->GetVariableByName(var.m_type, var.m_name))
+        {
+            pVar->Set(var.m_object);
+        }
     }
 }
 
@@ -164,6 +171,9 @@ PipelineState::~PipelineState()
 {
     for(auto* shader : m_shaderStages)
     {
-        shader->Release();
+        if(shader)
+        {
+            shader->Release();
+        }
     }
 }

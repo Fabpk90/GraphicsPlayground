@@ -14,6 +14,7 @@
 
 #include <taskflow/taskflow.hpp>
 
+#include "imgui.h"
 #include "Mesh.h"
 #include "FirstPersonCamera.hpp"
 #include "Common/interface/BasicMath.hpp"
@@ -39,6 +40,8 @@ struct Constants
 };
 
 class RayTracing;
+
+struct Group;
 
 class Engine {
 
@@ -68,7 +71,7 @@ public:
 
         if(m_gbuffer)
         {
-            m_gbuffer->Resize(float2(m_width, m_height));
+            m_gbuffer->resize(float2(m_width, m_height));
         }
 
         m_camera.SetProjAttribs(0.01f, 1000, (float)m_width / (float) m_height, 45.0f, Diligent::SURFACE_TRANSFORM_OPTIMAL, false);
@@ -117,6 +120,8 @@ public:
     RefCntAutoPtr<IRenderDevice>& getDevice() {return m_device;}
     RefCntAutoPtr<IShaderSourceInputStreamFactory> getShaderStreamFactory() { return m_ShaderSourceFactory; }
 
+    void addDebugTexture(ITexture* _tex) { m_registeredTexturesForDebug.push_back(_tex);}
+
 public:
     InputControllerWin32 m_inputController;
     ImGuiImplWin32* m_imguiRenderer;
@@ -135,8 +140,14 @@ private:
     static constexpr const char* PSO_GBUFFER = "gbuffer";
     static constexpr const char* PSO_LIGHTING = "lighting";
     static constexpr const char* PSO_TRANSPARENCY = "transparency";
+    static constexpr const char* PSO_TRANSPARENCY_COMPOSE = "transparency_compose";
 
     eastl::unordered_map<eastl::string, eastl::unique_ptr<PipelineState>> m_pipelines;
+
+    RefCntAutoPtr<ITexture> m_accumColorTexture;
+    RefCntAutoPtr<ITexture> m_revealTermTexture;
+
+    RefCntAutoPtr<IBuffer> m_fullScreenTriangleBuffer;
 
     GBuffer* m_gbuffer = nullptr;
 
@@ -169,14 +180,25 @@ private:
     tf::Executor m_executor;
     tf::Taskflow m_taskflow;
 
+    Mesh* m_clickedMesh = nullptr;
+
+    eastl::vector<ITexture*> m_registeredTexturesForDebug;
+    ImGuiTextFilter m_imguiFilter;
+
     void createDefaultTextures();
     void uiPass();
+
+    void debugTextures();
 
     void createTransparencyPipeline();
 
     void showFrameTimeGraph();
 
     void renderTransparency();
+
+    void createFullScreenResources();
+
+    void showGizmos();
 };
 
 

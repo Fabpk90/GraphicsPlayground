@@ -30,7 +30,7 @@ Mesh::Mesh(RefCntAutoPtr<IRenderDevice> _device, const char *_path,bool _needsAf
         if(file.good())
         {
             Assimp::Importer importer;
-            const aiScene* scene = importer.ReadFile(_path, aiProcessPreset_TargetRealtime_MaxQuality);
+            const aiScene* scene = importer.ReadFile(_path, aiProcessPreset_TargetRealtime_MaxQuality | aiProcess_GenBoundingBoxes);
 
             m_meshes.reserve(scene->mNumMeshes);
 
@@ -80,7 +80,6 @@ void Mesh::recursivelyLoadNode(aiNode *pNode, const aiScene *pScene)
         recursivelyLoadNode(pNode->mChildren[i], pScene);
     }
 }
-
 
 Mesh::Group Mesh::loadGroupFrom(const aiMesh& mesh, const aiScene *pScene)
 {
@@ -159,7 +158,10 @@ Mesh::Group Mesh::loadGroupFrom(const aiMesh& mesh, const aiScene *pScene)
             }
         });
 
-      m_executor.wait_for_all();
+    group.m_aabb.Min = float3(mesh.mAABB.mMin.x, mesh.mAABB.mMin.y, mesh.mAABB.mMin.z);
+    group.m_aabb.Max = float3(mesh.mAABB.mMax.x, mesh.mAABB.mMax.y, mesh.mAABB.mMax.z);
+
+    m_executor.wait_for_all();
 
     return group;
 }
@@ -240,11 +242,21 @@ void Mesh::draw(RefCntAutoPtr<IDeviceContext> _context, IShaderResourceBinding* 
     {
         if(grp.m_textures.empty())
         {
-            _srb->GetVariableByName(SHADER_TYPE_PIXEL, "g_TextureAlbedo")->
-            Set(_defaultTextures["albedo"]->GetDefaultView(Diligent::TEXTURE_VIEW_SHADER_RESOURCE));
+            if(isTransparent())
+            {
+                _srb->GetVariableByName(SHADER_TYPE_PIXEL, "g_TextureAlbedo")->
+                        Set(_defaultTextures["redTransparent"]->GetDefaultView(Diligent::TEXTURE_VIEW_SHADER_RESOURCE));
+            }
+            else
+            {
+                _srb->GetVariableByName(SHADER_TYPE_PIXEL, "g_TextureAlbedo")->
+                        Set(_defaultTextures["albedo"]->GetDefaultView(Diligent::TEXTURE_VIEW_SHADER_RESOURCE));
+            }
 
-            _srb->GetVariableByName(SHADER_TYPE_PIXEL, "g_TextureNormal")->
-                    Set(_defaultTextures["normal"]->GetDefaultView(Diligent::TEXTURE_VIEW_SHADER_RESOURCE));
+            if(auto* pVar = _srb->GetVariableByName(SHADER_TYPE_PIXEL, "g_TextureNormal"))
+            {
+                pVar->Set(_defaultTextures["normal"]->GetDefaultView(Diligent::TEXTURE_VIEW_SHADER_RESOURCE));
+            }
         }
         else
         {
@@ -294,13 +306,35 @@ void Mesh::drawInspector()
         if(ImGui::DragFloat3("Rotation", m_angle.Data()))
         {
             hasChanged = true;
-            //UPDATE QUATERNION
+            //todo: UPDATE QUATERNION
         }
     ImGui::PopID();
     if(hasChanged)
     {
         //Update matrix
         m_model = float4x4::Scale(m_scale) * m_rotation.ToMatrix() * float4x4::Translation(m_position);
-
     }
+}
+
+bool Mesh::isTransparent() const
+{
+    return m_isTransparent;
+}
+
+void Mesh::setTransparent(bool mIsTransparent)
+{
+    m_isTransparent = mIsTransparent;
+}
+
+bool Mesh::isClicked(const float4x4& _mvp, const float3 &RayOrigin, const float3 &RayDirection, float &EnterDist,
+                     float &ExitDist)
+{
+    for( auto& grp : m_meshes)
+    {
+        const BoundBox box = grp.m_aabb.Transform(m_model);
+        if(IntersectRayAABB(RayOrigin, RayDirection, box, EnterDist, ExitDist))
+            return true;
+    }
+
+    return false;
 }

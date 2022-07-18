@@ -33,22 +33,22 @@ public:
 	    }
     }
 
-    static constexpr char* GetName(EGBufferType _type)
+    static constexpr char* getName(EGBufferType _type)
     {
         switch (_type)
         {
 
             case EGBufferType::Albedo:
-                return "Albedo";
+                return "GBuffer Albedo";
                 break;
             case EGBufferType::Normal:
-                return "Normal";
+                return "GBuffer Normal";
                 break;
             case EGBufferType::Depth:
-                return "Depth";
+                return "GBuffer Depth";
                 break;
             case EGBufferType::Output:
-                return "Output";
+                return "GBuffer Output";
             case EGBufferType::Max:
                 return "";
                 break;
@@ -75,7 +75,7 @@ public:
         return m_textures[static_cast<uint>(_type)].m_tex;
     }
 
-    void Resize(float2 _size);
+    void resize(float2 _size);
 
 private:
 

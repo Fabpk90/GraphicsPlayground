@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 3.20)
 
-set(DILIGENT_NO_OPENGL)
-set(DILIGENT_NO_DIRECT3D11)
+set(DILIGENT_NO_OPENGL 1)
+set(DILIGENT_NO_DIRECT3D11 1)
 
 set(CMAKE_BUILD_PARALLEL_LEVEL 1)
 set(CMAKE_CXX_STANDARD 17)
@@ -40,7 +40,7 @@ target_include_directories(GraphicsPlayground PRIVATE "DiligentTools")
 
 find_package(Vulkan)
 find_package(EASTL CONFIG REQUIRED)
-#find_package(assimp CONFIG REQUIRED)
+find_package(assimp CONFIG REQUIRED)
 IF(${RETAIL})
     #add_definitions(-D FINAL 1)
     option(TRACY_ENABLE "" OFF)
@@ -55,10 +55,11 @@ endif()
 add_subdirectory(external/Tracy)
 
 IF(${CMAKE_BUILD_TYPE} MATCHES Debug)
-    target_link_libraries(GraphicsPlayground assimp/assimp-vc143-mtd
+    target_link_libraries(GraphicsPlayground #assimp/assimp-vc143-mtd
+            assimp::assimp
             Tracy::TracyClient
-            Diligent-GraphicsEngineD3D11-shared
-            Diligent-GraphicsEngineOpenGL-shared
+            #Diligent-GraphicsEngineD3D11-shared
+            #Diligent-GraphicsEngineOpenGL-shared
             Diligent-GraphicsEngineD3D12-shared
             Diligent-GraphicsEngineVk-shared
             Diligent-Imgui
@@ -71,10 +72,11 @@ IF(${CMAKE_BUILD_TYPE} MATCHES Debug)
             #DiligentCore/DiligentGraphicsAccessoriesd DiligentCore/DiligentGraphicsToolsd)
             )
 else()
-target_link_libraries(GraphicsPlayground assimp/assimp-vc143-mt
+target_link_libraries(GraphicsPlayground #assimp/assimp-vc143-mt
+        assimp::assimp
         Tracy::TracyClient
-        Diligent-GraphicsEngineD3D11-shared
-        Diligent-GraphicsEngineOpenGL-shared
+        #Diligent-GraphicsEngineD3D11-shared
+        #Diligent-GraphicsEngineOpenGL-shared
         Diligent-GraphicsEngineD3D12-shared
         Diligent-GraphicsEngineVk-shared
         Diligent-Imgui
