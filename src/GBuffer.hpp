@@ -63,7 +63,7 @@ public:
         case EGBufferType::Albedo:
             return TEX_FORMAT_RGBA8_UNORM_SRGB;
         case EGBufferType::Output:
-            return  TEX_FORMAT_RGBA8_UNORM;
+            return  TEX_FORMAT_RGBA8_UNORM_SRGB;
         case EGBufferType::Normal: return TEX_FORMAT_RGBA8_UNORM; //todo: compress octahedron
         case EGBufferType::Depth: return  TEX_FORMAT_D32_FLOAT;
 	    default: return TEX_FORMAT_BGRA8_UNORM;

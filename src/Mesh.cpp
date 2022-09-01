@@ -15,7 +15,7 @@
 using namespace Diligent;
 
 Mesh::Mesh(RefCntAutoPtr<IRenderDevice> _device, const char *_path,bool _needsAfterLoadedActions, float3 _position, float3 _scale, float3 _angle)
-: m_path(_path), m_position(_position), m_scale(_scale), m_device(eastl::move(_device)), m_angle(_angle)
+: m_path(_path), m_position(_position), m_scale(_scale), m_device(eastl::move(_device)), m_angle(_angle), m_id(idCount++)
 {
     ZoneScopedN("Loading Mesh");
     ZoneText(m_path.c_str(), m_path.size());
@@ -293,7 +293,7 @@ void Mesh::draw(RefCntAutoPtr<IDeviceContext> _context, IShaderResourceBinding* 
 void Mesh::drawInspector()
 {
     static bool hasChanged = false;
-    ImGui::PushID(m_path.c_str());
+    ImGui::PushID(m_id);
     ImGui::Text("%s", m_path.c_str());
         if(ImGui::DragFloat3("Translation", m_position.Data()))
         {
@@ -337,4 +337,9 @@ bool Mesh::isClicked(const float4x4& _mvp, const float3 &RayOrigin, const float3
     }
 
     return false;
+}
+
+void Mesh::setTranslation(Vector3<float> vector3)
+{
+    m_position = vector3;
 }

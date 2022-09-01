@@ -46,9 +46,10 @@ void GBuffer::resize(float2 _size)
 
     for (auto& tex : m_textures)
     {
+        Engine::instance->removeDebugTexture(tex.m_tex);
         tex.m_tex->Release();
+        tex.m_tex = nullptr;
     }
-
     createTextures();
 }
 
@@ -64,7 +65,7 @@ BIND_FLAGS GBuffer::getBindFlags(const GBuffer::EGBufferType type)
             return BIND_SHADER_RESOURCE | BIND_DEPTH_STENCIL;
             break;
         case EGBufferType::Output:
-            return BIND_UNORDERED_ACCESS | BIND_SHADER_RESOURCE; // added BIND_SHADER_RESOURCE for debug
+            return BIND_UNORDERED_ACCESS | BIND_SHADER_RESOURCE | BIND_RENDER_TARGET; // added BIND_SHADER_RESOURCE for debug
             break;
         case EGBufferType::Max:
             break;

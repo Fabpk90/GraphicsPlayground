@@ -41,9 +41,22 @@ public:
         RefCntAutoPtr<IBuffer> m_meshIndexBuffer;
     };
 
+    void setTranslation(Vector3<float> vector3);
+
 public:
+
+    inline static std::atomic<uint32_t> idCount = 0;
+
     Mesh(RefCntAutoPtr<IRenderDevice> _device, const char* _path, bool _needsAfterLoadedActions = false, float3 _position = float3(0), float3 _scale = float3(1)
             , float3 _angle = float3(0.0f));
+
+
+    bool operator<(Mesh* _other)
+    {
+        return length(m_position) < length(_other->m_position);
+    }
+
+    //todo: add texture emplace with already loaded tex
 
     void addTexture(const char* _path, int index)
     {
@@ -81,7 +94,11 @@ public:
     float4x4 getRotation() { return m_rotation.ToMatrix();}
     //void setRotation(const float4x4& _rotation) { m_rotation.MakeQuaternion()}
 
+    eastl::vector<Group>& getGroups(){ return m_meshes;}
+
 private:
+    uint32_t m_id;
+
     bool m_isLoaded;
     bool m_isTransparent = false;
 

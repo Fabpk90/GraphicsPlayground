@@ -10,6 +10,7 @@
 
 #include <EASTL/allocator.h>
 #include <EASTL/unique_ptr.h>
+#include <EASTL/vector_set.h>
 #include <EASTL/unordered_map.h>
 
 #include <taskflow/taskflow.hpp>
@@ -58,50 +59,8 @@ public:
     static Engine* instance;
 
 public:
-    static RENDER_DEVICE_TYPE constexpr getRenderType() { return Diligent::RENDER_DEVICE_TYPE_VULKAN;}
-    void windowResize(int _width, int _height)
-    {
-        //todo: this whole method is an ugly hax, change this
-        m_isMinimized = true;
-        if(_width == 0 || _height == 0) // minimizing the window
-            return;
-        m_width = _width; m_height = _height;
-        if(m_immediateContext)
-            m_immediateContext->SetViewports(1, nullptr, m_width, m_height);
-
-        if(m_gbuffer)
-        {
-            m_gbuffer->resize(float2(m_width, m_height));
-        }
-
-        m_camera.SetProjAttribs(0.01f, 1000, (float)m_width / (float) m_height, 45.0f, Diligent::SURFACE_TRANSFORM_OPTIMAL, false);
-
-        //todo: this is ugly, fix that
-        if(m_swapChain)
-        {
-            m_swapChain->Resize(m_width, m_height);
-        }
-
-        auto psoLighting = m_pipelines.find("lighting");
-        if(psoLighting != m_pipelines.end())
-        {
-            auto& srb = psoLighting->second->getSRB();
-            srb.GetVariableByName(SHADER_TYPE_COMPUTE, "g_color")
-                    ->Set(m_gbuffer->GetTextureType(GBuffer::EGBufferType::Albedo)->GetDefaultView(Diligent::TEXTURE_VIEW_SHADER_RESOURCE), SET_SHADER_RESOURCE_FLAG_ALLOW_OVERWRITE);
-
-            srb.GetVariableByName(SHADER_TYPE_COMPUTE, "g_normal")
-                    ->Set(m_gbuffer->GetTextureType(GBuffer::EGBufferType::Normal)->GetDefaultView(Diligent::TEXTURE_VIEW_SHADER_RESOURCE), SET_SHADER_RESOURCE_FLAG_ALLOW_OVERWRITE);
-
-            srb.GetVariableByName(SHADER_TYPE_COMPUTE, "g_depth")
-                    ->Set(m_gbuffer->GetTextureType(GBuffer::EGBufferType::Depth)->GetDefaultView(Diligent::TEXTURE_VIEW_SHADER_RESOURCE), SET_SHADER_RESOURCE_FLAG_ALLOW_OVERWRITE);
-
-            //todo: change this when resizing (maybe a callback system for resize event ?)
-            srb.GetVariableByName(SHADER_TYPE_COMPUTE, "g_output")
-                    ->Set(m_gbuffer->GetTextureType(GBuffer::EGBufferType::Output)->GetDefaultView(Diligent::TEXTURE_VIEW_UNORDERED_ACCESS), SET_SHADER_RESOURCE_FLAG_ALLOW_OVERWRITE);
-        }
-
-        m_isMinimized = false;
-    }
+    static RENDER_DEVICE_TYPE constexpr getRenderType() { return Diligent::RENDER_DEVICE_TYPE_D3D12;}
+    void windowResize(int _width, int _height);
     bool initializeDiligentEngine(HWND hwnd);
     void createResources();
 
@@ -121,6 +80,12 @@ public:
     RefCntAutoPtr<IShaderSourceInputStreamFactory> getShaderStreamFactory() { return m_ShaderSourceFactory; }
 
     void addDebugTexture(ITexture* _tex) { m_registeredTexturesForDebug.push_back(_tex);}
+    void removeDebugTexture(ITexture* _tex){
+        auto it = eastl::find(m_registeredTexturesForDebug.begin(), m_registeredTexturesForDebug.end(), _tex);
+
+        if (it != m_registeredTexturesForDebug.end())
+            m_registeredTexturesForDebug.erase(it);
+    }
 
 public:
     InputControllerWin32 m_inputController;
@@ -129,6 +94,9 @@ public:
 private:
     int m_width, m_height;
     bool m_isMinimized = false;
+    std::chrono::time_point<std::chrono::steady_clock> m_tickLastFrame;
+    float m_deltaTime;
+
 
     IEngineFactory*               m_engineFactory  = nullptr;
     RefCntAutoPtr<IShaderSourceInputStreamFactory> m_ShaderSourceFactory;
@@ -137,12 +105,20 @@ private:
     RefCntAutoPtr<IDeviceContext> m_immediateContext;
     RefCntAutoPtr<ISwapChain>     m_swapChain;
 
+    //todo replace this by a hash table/map
+
     static constexpr const char* PSO_GBUFFER = "gbuffer";
     static constexpr const char* PSO_LIGHTING = "lighting";
     static constexpr const char* PSO_TRANSPARENCY = "transparency";
     static constexpr const char* PSO_TRANSPARENCY_COMPOSE = "transparency_compose";
+    static constexpr const char* PSO_ZPREPASS = "zprepass";
 
     eastl::unordered_map<eastl::string, eastl::unique_ptr<PipelineState>> m_pipelines;
+
+    static constexpr const char* TEX_ACCUM_COLOR = "accumColor";
+    static constexpr const char* TEX_REVEAL = "revealTerm";
+
+    eastl::unordered_map<eastl::string, eastl::unique_ptr<ITexture>> m_textures;
 
     RefCntAutoPtr<ITexture> m_accumColorTexture;
     RefCntAutoPtr<ITexture> m_revealTermTexture;
@@ -153,12 +129,15 @@ private:
 
     RefCntAutoPtr<IBuffer> m_bufferMatrixMesh;
 
-    eastl::vector<Mesh*> m_meshes;
+    eastl::vector<Mesh*> m_meshes; // Convenient vector to list all meshes
+    eastl::vector_set<Mesh*> m_meshOpaque;
+    eastl::vector_set<Mesh*> m_meshTransparent;
+
     FirstPersonCamera m_camera;
 
     RefCntAutoPtr<IBuffer> m_bufferLighting;
 
-    float4 m_lightPos = float4(0);
+    float4 m_lightPos = float4(1);
 
     RenderDocHook* m_renderdoc = nullptr;
 
@@ -182,6 +161,7 @@ private:
 
     Mesh* m_clickedMesh = nullptr;
 
+    //TODO: we should go to all resources counted system (measure perf maybe ?)
     eastl::vector<ITexture*> m_registeredTexturesForDebug;
     ImGuiTextFilter m_imguiFilter;
 
@@ -199,6 +179,21 @@ private:
     void createFullScreenResources();
 
     void showGizmos();
+
+    void copyToSwapChain();
+
+    void createZprepassPipeline();
+
+    void Im3dNewFrame();
+
+    void AddMesh(Mesh* _mesh);
+    void SortMeshes();
+
+    void renderGBuffer();
+
+    void renderZPrepass();
+
+    void createGBufferPipeline();
 };
 
 
