@@ -3,7 +3,7 @@
 //
 
 #include "PipelineState.hpp"
-#include "Tracy.hpp"
+#include "tracy/Tracy.hpp"
 
 PipelineState::PipelineState(RefCntAutoPtr<IRenderDevice> _device, const char* _name, PIPELINE_TYPE _type, const char* _shaderPath, eastl::vector<VarStruct> _staticVars, eastl::vector<VarStruct> _dynamicVars
                              , GraphicsPipelineDesc _graphicsDesc
@@ -36,23 +36,26 @@ bool PipelineState::createPipeline(const PIPELINE_TYPE &_type, PipelineStateCrea
     {
         m_type = PIPELINE_TYPE_GRAPHICS;
 
-        m_graphicInfo.pVS = m_pipelineShader->getShaderStage(Shader::EShaderStage::Vertex).RawPtr<IShader>();
-        m_graphicInfo.pPS = m_pipelineShader->getShaderStage(Shader::EShaderStage::Pixel).RawPtr<IShader>();
+        auto vs = m_pipelineShader->getShaderStage(Shader::EShaderStage::Vertex);
+        m_graphicInfo.pVS = vs;
+        auto ps = m_pipelineShader->getShaderStage(Shader::EShaderStage::Pixel);
+        m_graphicInfo.pPS = ps;
 
         assert(m_graphicInfo.pVS && m_graphicInfo.pPS);
 
         m_graphicInfo.GraphicsPipeline.InputLayout.LayoutElements = m_layoutElements.data();
         m_graphicInfo.GraphicsPipeline.InputLayout.NumElements = m_layoutElements.size();
 
-        m_shaderStages.push_back(m_graphicInfo.pVS);
-        m_shaderStages.push_back(m_graphicInfo.pPS);
+        m_shaderStages.push_back(vs);
+        m_shaderStages.push_back(ps);
     }
     else if (_type == PIPELINE_TYPE_COMPUTE)
     {
         m_type = PIPELINE_TYPE_COMPUTE;
-        m_computeInfo.pCS = m_pipelineShader->getShaderStage(Shader::EShaderStage::Compute).RawPtr<IShader>();
+        auto cs = m_pipelineShader->getShaderStage(Shader::EShaderStage::Compute);
+        m_computeInfo.pCS = cs;
 
-        m_shaderStages.push_back(m_computeInfo.pCS);
+        m_shaderStages.push_back(cs);
     }
 
     eastl::vector<ShaderResourceVariableDesc> vars;
@@ -64,7 +67,7 @@ bool PipelineState::createPipeline(const PIPELINE_TYPE &_type, PipelineStateCrea
             TEXTURE_ADDRESS_CLAMP, TEXTURE_ADDRESS_CLAMP, TEXTURE_ADDRESS_CLAMP
     };
 
-    for (auto* shader : m_shaderStages)
+    for (auto& shader : m_shaderStages)
     {
         if(!shader) return false;
         for (int i = 0; i < shader->GetResourceCount(); ++i)
@@ -168,12 +171,4 @@ void PipelineState::setDynamicVars(const eastl::vector<VarStruct> &_vars)
 }
 
 PipelineState::~PipelineState()
-{
-    for(auto* shader : m_shaderStages)
-    {
-        if(shader)
-        {
-            shader->Release();
-        }
-    }
-}
+= default;

@@ -76,7 +76,6 @@ enum INPUT_KEY_STATE_FLAGS : Uint8
     INPUT_KEY_STATE_FLAG_KEY_NONE     = 1 << 0,
     INPUT_KEY_STATE_FLAG_KEY_IS_DOWN  = 1 << 1,
     INPUT_KEY_STATE_FLAG_KEY_WAS_DOWN = 1 << 2,
-    INPUT_KEY_STATE_FLAG_KEY_WAS_PRESSED = 1 << 3
 };
 DEFINE_FLAG_ENUM_OPERATORS(INPUT_KEY_STATE_FLAGS)
 
@@ -96,11 +95,6 @@ public:
     bool IsKeyDown(InputKeys Key) const
     {
         return (GetKeyState(Key) & INPUT_KEY_STATE_FLAG_KEY_IS_DOWN) != 0;
-    }
-
-    bool IsKeyJustPressed(InputKeys Key) const
-    {
-        return (GetKeyState(Key) & INPUT_KEY_STATE_FLAG_KEY_WAS_PRESSED) != 0;
     }
 
     void ClearState()

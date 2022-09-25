@@ -37,10 +37,12 @@ target_compile_options(GraphicsPlayground PRIVATE -DUNICODE -DENGINE_DLL)
 
 target_include_directories(GraphicsPlayground PRIVATE "DiligentCore")
 target_include_directories(GraphicsPlayground PRIVATE "DiligentTools")
+target_include_directories(GraphicsPlayground PRIVATE "meshoptimizer")
 
 find_package(Vulkan)
 find_package(EASTL CONFIG REQUIRED)
 find_package(assimp CONFIG REQUIRED)
+find_package(meshoptimizer CONFIG REQUIRED)
 IF(${RETAIL})
     #add_definitions(-D FINAL 1)
     option(TRACY_ENABLE "" OFF)
@@ -67,6 +69,7 @@ IF(${CMAKE_BUILD_TYPE} MATCHES Debug)
 
             EASTL
             mimalloc-static
+            meshoptimizer::meshoptimizer
 
             #DiligentTools/DiligentToolsd DiligentCore/DiligentWin32Platformd DiligentCore/DiligentCommond DiligentCore/DiligentBasicPlatformd
             #DiligentCore/DiligentGraphicsAccessoriesd DiligentCore/DiligentGraphicsToolsd)
@@ -84,6 +87,7 @@ target_link_libraries(GraphicsPlayground #assimp/assimp-vc143-mt
 
         EASTL
         mimalloc-static
+        meshoptimizer::meshoptimizer
           #DiligentTools/DiligentTools DiligentCore/DiligentWin32Platform DiligentCore/DiligentCommon DiligentCore/DiligentBasicPlatform
            # DiligentCore/DiligentGraphicsAccessories DiligentCore/DiligentGraphicsTools)
         )

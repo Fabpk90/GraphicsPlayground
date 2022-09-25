@@ -1,7 +1,5 @@
 #include <mimalloc.h>
 #include <mimalloc-new-delete.h>
-#include "Tracy.hpp"
-
 void* operator new[](size_t size, const char* pName, int flags, unsigned debugFlags, const char* file, int line)
 {
     auto ptr = mi_new(size);
@@ -16,7 +14,7 @@ void* operator new[](size_t size, size_t alignment, size_t alignmentOffset, cons
     }*/
 
     auto ptr = mi_new_aligned(size, alignment);
-    TracySecureAlloc(ptr, size)
+    TracySecureAlloc(ptr, size);
 
     return ptr;
 }

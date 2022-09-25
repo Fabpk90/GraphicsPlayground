@@ -4,6 +4,7 @@
 #include "Engine.h"
 
 Shader::Shader(const char* _path, PIPELINE_TYPE _type) : m_path(_path), m_type(_type)
+, m_hashes({0, 0})
 {
 	m_info.pShaderSourceStreamFactory = Engine::instance->getShaderStreamFactory();
 	// Tell the system that the shader source code is in HLSL.
@@ -12,6 +13,12 @@ Shader::Shader(const char* _path, PIPELINE_TYPE _type) : m_path(_path), m_type(_
 	// OpenGL backend requires emulated combined HLSL texture samplers (g_Texture + g_Texture_sampler combination)
     m_info.UseCombinedTextureSamplers = true;
 
+    eastl::array<ShaderMacro, 2> macros = {
+            ShaderMacro("USE_PACKED_VERTEX", Engine::instance->AreVerticesPacked() ? "1" : "0"),
+            {}
+    };
+    m_info.Macros = macros.data();
+
     reload();
 }
 
@@ -19,69 +26,143 @@ bool Shader::reload()
 {
     auto& device = Engine::instance->getDevice();
 
+    bool hasNotSameHash = true;
+
     if(m_type == Diligent::PIPELINE_TYPE_GRAPHICS)
     {
         char path[512];
 
+        //todo fix me !
         sprintf_s(path, 512, "%s/vs.hlsl", m_path.data());
+        eastl::string str = "shader/";
+        str += path;
 
-        // Create a vertex shader
-        RefCntAutoPtr<IShader> pVS;
+        std::ifstream t(str.c_str());
+
+        if(t.good())
         {
-            m_info.Desc.ShaderType = SHADER_TYPE_VERTEX;
-            m_info.EntryPoint = "main";
-            m_info.Desc.Name = path;
-            m_info.FilePath = path;
-            device->CreateShader(m_info, &pVS);
-        }
+            t.seekg(0, std::ios::end);
+            size_t size = t.tellg();
+            eastl::string buffer(size, ' ');
+            t.seekg(0);
+            t.read(&buffer[0], size);
+            meow_u128 hash = MeowHash(MeowDefaultSeed, buffer.size(), buffer.data());
 
-        if(!pVS) return false;
-        std::cout << "Compiled " << path << " successfully" << std::endl;
+            if(!MeowHashesAreEqual(hash, m_hashes[0]))
+            {
+                m_hashes[0] = hash;
+                RefCntAutoPtr<IShader> pVS;
+                {
+                    m_info.Desc.ShaderType = SHADER_TYPE_VERTEX;
+                    m_info.EntryPoint = "main";
+                    m_info.Desc.Name = path;
+                    m_info.Source = buffer.c_str();
+                    m_info.SourceLength = buffer.size();
+                    device->CreateShader(m_info, &pVS);
+                }
+                m_shaders[0] = pVS;
+                std::cout << "Compiled " << path << " successfully" << std::endl;
+            }
+            else
+            {
+                //std::cout << "Hashes are equal for " << path << std::endl;
+                hasNotSameHash = false;
+            }
+        }
+        else
+        {
+            return false;
+        }
 
         sprintf_s(path, 512, "%s/ps.hlsl", m_path.data());
-        // Create a pixel shader
-        RefCntAutoPtr<IShader> pPS;
+
+        str = "shader/";
+        str += path;
+
+        t = std::ifstream(str.c_str());
+        if(t.good())
         {
-            m_info.Desc.ShaderType = SHADER_TYPE_PIXEL;
-            m_info.EntryPoint = "main";
-            m_info.Desc.Name = path;
-            m_info.FilePath = path;
-            device->CreateShader(m_info, &pPS);
+            t.seekg(0, std::ios::end);
+            size_t size = t.tellg();
+            eastl::string buffer(size, ' ');
+            t.seekg(0);
+            t.read(&buffer[0], size);
+            meow_u128 hash = MeowHash(MeowDefaultSeed, buffer.size(), buffer.data());
+
+            if(!MeowHashesAreEqual(hash, m_hashes[1]))
+            {
+                m_hashes[1] = hash;
+                RefCntAutoPtr<IShader> pPS;
+                {
+                    m_info.Desc.ShaderType = SHADER_TYPE_PIXEL;
+                    m_info.EntryPoint = "main";
+                    m_info.Source = buffer.c_str();
+                    m_info.SourceLength = buffer.size();
+                    device->CreateShader(m_info, &pPS);
+                }
+
+                m_shaders[1] = pPS;
+                std::cout << "Compiled " << path << " successfully" << std::endl;
+            }
+            else
+            {
+                //std::cout << "Hashes are equal for " << path << std::endl;
+                hasNotSameHash = false;
+            }
         }
-
-        if(!pVS) return false;
-
-        std::cout << "Compiled " << path << " successfully" << std::endl;
-
-        m_shaders[0] = pVS;
-        m_shaders[1] = pPS;
-
+        else
+        {
+            return false;
+        }
     }
     else if (m_type == Diligent::PIPELINE_TYPE_COMPUTE)
     {
         char path[512];
 
         sprintf_s(path, 512, "%s/cs.hlsl", m_path.data());
+        eastl::string str = "shader/";
+        str += path;
 
-        // Create a vertex shader
-        RefCntAutoPtr<IShader> pCS;
+        std::ifstream t(str.c_str());
+        if(t.good())
         {
-            m_info.Desc.ShaderType = SHADER_TYPE_COMPUTE;
-            m_info.EntryPoint = "main";
-            m_info.Desc.Name = path;
-            m_info.FilePath = path;
+            t.seekg(0, std::ios::end);
+            size_t size = t.tellg();
+            eastl::string buffer(size, ' ');
+            t.seekg(0);
+            t.read(&buffer[0], size);
+            meow_u128 hash = MeowHash(MeowDefaultSeed, buffer.size(), buffer.data());
 
-            device->CreateShader(m_info, &pCS);
+            if (!MeowHashesAreEqual(hash, m_hashes[0]))
+            {
+                m_hashes[0] = hash;
+                t.close();
+                // Create a vertex shader
+                RefCntAutoPtr<IShader> pCS;
+                {
+                    m_info.Desc.ShaderType = SHADER_TYPE_COMPUTE;
+                    m_info.EntryPoint = "main";
+                    m_info.Source = buffer.c_str();
+                    m_info.SourceLength = buffer.size();
+
+                    device->CreateShader(m_info, &pCS);
+                    std::cout << "Compiled " << path << " successfully" << std::endl;
+                    m_shaders[0] = pCS;
+                }
+            }
+            else
+            {
+                //std::cout << "Hashes are equal for " << path << std::endl;
+                hasNotSameHash = false;
+            }
         }
-
-        if(!pCS) return false;
-
-        std::cout << "Compiled " << path << " successfully" << std::endl;
-
-        m_shaders[0] = pCS;
+        else
+        {
+            return false;
+        }
     }
 
-    return true;
+    return hasNotSameHash;
 }
 
 RefCntAutoPtr<IShader> Shader::getShaderStage(const EShaderStage _stage) const
@@ -97,5 +178,15 @@ RefCntAutoPtr<IShader> Shader::getShaderStage(const EShaderStage _stage) const
 
 void Shader::Release()
 {
+    //needed for ref counting
+#ifdef _DEBUG
+    std::cout << "Deleting shader: " << m_path.c_str() << std::endl;
+#endif
+}
 
+Shader::~Shader()
+{
+#ifdef _DEBUG
+    std::cout << "Deleting shader: " << m_path.c_str() << std::endl;
+#endif
 }

@@ -20,6 +20,12 @@
 
 using namespace Diligent;
 
+struct VertexPacked
+{
+    uint2 m_position;
+    uint2 m_normaluv; // x 8 LMB y 8, z = cross(x,y)
+};
+
 struct Vertex
 {
     float3 m_position;
@@ -31,9 +37,9 @@ class Mesh {
 public:
     struct Group
     {
-        std::vector<Vertex> m_vertices;
-        std::vector<uint> m_indices;
-        std::vector<RefCntAutoPtr<ITexture>> m_textures;
+        eastl::vector<VertexPacked> m_vertices;
+        eastl::vector<uint> m_indices;
+        eastl::vector<RefCntAutoPtr<ITexture>> m_textures;
         BoundBox m_aabb;
 
         //This is not really optimal, as the data doesn't need to be both on CPU AND GPU
@@ -67,10 +73,6 @@ public:
     //todo: make a string_view version of this
     void addTexture(eastl::string& _path, Group& _group);
     void addTexture(eastl::string& _path, int index);
-
-    void draw(RefCntAutoPtr<IDeviceContext> _context, IShaderResourceBinding* _srb, FirstPersonCamera &_camera,
-         RefCntAutoPtr<IBuffer> _bufferMatrices,
-         eastl::unordered_map<eastl::string, RefCntAutoPtr<ITexture>> &_defaultTextures);
 
     void drawInspector();
 

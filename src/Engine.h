@@ -41,6 +41,7 @@ struct Constants
 };
 
 class RayTracing;
+class FrameGraph;
 
 struct Group;
 
@@ -87,6 +88,8 @@ public:
             m_registeredTexturesForDebug.erase(it);
     }
 
+    bool AreVerticesPacked() { return m_isVertexPacked;}
+
 public:
     InputControllerWin32 m_inputController;
     ImGuiImplWin32* m_imguiRenderer;
@@ -125,6 +128,8 @@ private:
 
     RefCntAutoPtr<IBuffer> m_fullScreenTriangleBuffer;
 
+    bool m_isVertexPacked = true;
+
     GBuffer* m_gbuffer = nullptr;
 
     RefCntAutoPtr<IBuffer> m_bufferMatrixMesh;
@@ -136,6 +141,8 @@ private:
     FirstPersonCamera m_camera;
 
     RefCntAutoPtr<IBuffer> m_bufferLighting;
+
+    eastl::vector<RefCntAutoPtr<ITexture>> m_cascadeTextures;
 
     float4 m_lightPos = float4(1);
 
@@ -164,6 +171,8 @@ private:
     //TODO: we should go to all resources counted system (measure perf maybe ?)
     eastl::vector<ITexture*> m_registeredTexturesForDebug;
     ImGuiTextFilter m_imguiFilter;
+
+    FrameGraph* m_frameGraph;
 
     void createDefaultTextures();
     void uiPass();
@@ -194,6 +203,10 @@ private:
     void renderZPrepass();
 
     void createGBufferPipeline();
+
+    void renderCSM();
+
+    void createCSMPipeline();
 };
 
 

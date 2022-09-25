@@ -62,7 +62,7 @@ private:
 
     eastl::vector<LayoutElement> m_layoutElements;
     RefCntAutoPtr<IPipelineState> m_pipeline;
-    eastl::vector<IShader*> m_shaderStages;
+    eastl::vector<RefCntAutoPtr<IShader>> m_shaderStages;
     RefCntAutoPtr<IShaderResourceBinding> m_SRB;
 
     eastl::vector<VarStruct> m_staticVars;

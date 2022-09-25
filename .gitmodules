@@ -2,3 +2,6 @@
 	path = .\\external\\Tracy
 	url = https://github.com/wolfpld/tracy.git
 
+[submodule "external/meshoptimizer"]
+	path = external/meshoptimizer
+	url = https://github.com/zeux/meshoptimizer.git

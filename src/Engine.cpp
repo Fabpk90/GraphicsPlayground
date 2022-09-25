@@ -22,11 +22,13 @@
 #include <EASTL/unique_ptr.h>
 #include "ImGuiImplWin32.hpp"
 #include "Graphics/GraphicsTools/interface/DurationQueryHelper.hpp"
-#include "Tracy.hpp"
 #include "RayTracing.hpp"
 #include "TextureUtilities.h"
 #include "im3d/im3d.h"
 #include "im3d/im3d_math.h"
+#include "assimp/DefaultLogger.hpp"
+#include "FrameGraph.hpp"
+#include "tracy/Tracy.hpp"
 
 Engine* Engine::instance = nullptr;
 
@@ -129,9 +131,12 @@ void Engine::createResources()
     m_camera.SetProjAttribs(0.01f, 1000, (float)m_width / (float) m_height, 45.0f, Diligent::SURFACE_TRANSFORM_OPTIMAL, false);
 
     createZprepassPipeline();
+    createCSMPipeline();
     createGBufferPipeline();
     createLightingPipeline();
     createTransparencyPipeline();
+
+    //auto * logger = Assimp::DefaultLogger::create();
 
     m_executor.silent_async([&](){
         Mesh* m = new Mesh(m_device, "mesh/Bunny/stanford-bunny.obj");
@@ -141,41 +146,71 @@ void Engine::createResources()
         AddMesh(m);
     });
 
-    m_executor.silent_async([&](){
-        auto* m = new Mesh(m_device, "mesh/Bunny/stanford-bunny.obj");
-        m->setTransparent(true);
-        m->addTexture("blueTransparent16x16.png", 0);
+    for (int i = 0; i < 25; ++i)
+    {
+        m_executor.silent_async([&](){
+            auto* m = new Mesh(m_device, "mesh/Bunny/stanford-bunny.obj");
+            m->setTransparent(true);
+            m->addTexture("blueTransparent16x16.png", 0);
 
-        AddMesh(m);
-    });
+            AddMesh(m);
+        });
 
-    m_executor.silent_async([&](){
-       auto* m = new Mesh(m_device, "mesh/Bunny/stanford-bunny.obj");
-        m->setTransparent(true);
-        m->addTexture("greenTransparent16x16.png", 0);
+        m_executor.silent_async([&](){
+            auto* m = new Mesh(m_device, "mesh/Bunny/stanford-bunny.obj");
+            m->setTransparent(true);
+            m->addTexture("greenTransparent16x16.png", 0);
 
-        AddMesh(m);
-    });
+            AddMesh(m);
+        });
 
-    m_executor.silent_async([&](){
-       auto* m = new Mesh(m_device, "mesh/cerberus/Cerberus_LP.fbx", true);
+        m_executor.silent_async([&](){
+            auto* m = new Mesh(m_device, "mesh/cerberus/Cerberus_LP.fbx", true);
 
-        m->getModel() *= float4x4::Translation(0, 0, 10);
-        m->addTexture("textures/Cerberus_N.tga", 0);
-        m->setIsLoaded(true);
+            m->getModel() *= float4x4::Translation(0, 0, 10);
+            m->addTexture("textures/Cerberus_N.tga", 0);
+            m->setIsLoaded(true);
 
-        AddMesh(m);
-    });
+            AddMesh(m);
+        });
+    }
+
 
     m_executor.silent_async([&](){
        // m_meshes[5] = new Mesh(m_device, "mesh/Sponza/Sponza.fbx");
     });
+
+    struct Data
+    {
+        int m_test = 1;
+        RenderPassResources m_tex;
+    };
+
+    m_frameGraph = new FrameGraph();
+
+    m_frameGraph->addPass<Data>("Test Name", [&](FrameGraphBuilder& _frameBuilder, Data& _data)
+    {
+        TextureDesc desc;
+        desc.Format = Diligent::TEX_FORMAT_RGBA16_FLOAT;
+        desc.Width = 1280;
+        desc.Height = 720;
+        desc.BindFlags = Diligent::BIND_SHADER_RESOURCE | Diligent::BIND_RENDER_TARGET;
+
+        _data.m_tex = _frameBuilder.createTexture(desc);
+
+        }, [=](const Data & _data, const RenderPassResources & _renderResources)
+    {
+
+    });
+
+    m_frameGraph->startSetup();
+    m_frameGraph->startCompiling();
 }
 
 void Engine::render()
 {
     const auto now = std::chrono::high_resolution_clock::now();
-    m_deltaTime = std::chrono::duration_cast<std::chrono::milliseconds>(now - m_tickLastFrame).count();
+    m_deltaTime = std::chrono::duration_cast<std::chrono::milliseconds>(now - m_tickLastFrame).count() * 0.01; //0.16 format
     m_tickLastFrame = now;
 
     if(m_isMinimized) return;
@@ -192,7 +227,7 @@ void Engine::render()
         if(m_inputController.GetMouseState().ButtonFlags & Diligent::MouseState::BUTTON_FLAG_LEFT
         && !ImGui::GetIO().WantCaptureMouse)
         {
-            ZoneScopedN("RayCast Selection")
+            ZoneScopedN("RayCast Selection");
 
             const float3 rayNDC((2.0f * m_inputController.GetMouseState().PosX) / (float)m_width - 1.0f
                                   , 1 - ( (2.0f * m_inputController.GetMouseState().PosY) / (float)m_height)
@@ -230,6 +265,7 @@ void Engine::render()
 
     //z prepass
     renderZPrepass();
+    renderCSM();
 
     //gbuffer
     renderGBuffer();
@@ -484,6 +520,7 @@ Engine::~Engine()
     delete m_renderdoc;
     delete m_raytracing;
     delete m_imguiRenderer;
+    delete m_frameGraph;
 }
 
 void Engine::createDefaultTextures()
@@ -614,7 +651,6 @@ void Engine::createTransparencyPipeline()
 
 void Engine::renderTransparency()
 {
-    {
         ITextureView* pRTV[] = {m_accumColorTexture->GetDefaultView(Diligent::TEXTURE_VIEW_RENDER_TARGET)
                 , m_revealTermTexture->GetDefaultView(Diligent::TEXTURE_VIEW_RENDER_TARGET)};
         auto pDSV = m_gbuffer->GetTextureType(GBuffer::EGBufferType::Depth);// m_swapChain->GetDepthBufferDSV();
@@ -628,16 +664,50 @@ void Engine::renderTransparency()
 
         m_immediateContext->SetPipelineState(m_pipelines[PSO_TRANSPARENCY]->getPipeline());
 
+        auto& psoTransparency = m_pipelines[PSO_TRANSPARENCY];
+
         for (auto* mesh: m_meshes)
         {
             if(mesh && mesh->isLoaded() && mesh->isTransparent())
             {
-                mesh->draw(m_immediateContext, &m_pipelines[PSO_TRANSPARENCY]->getSRB(), m_camera, m_bufferMatrixMesh, m_defaultTextures);
+                auto& groups = mesh->getGroups();
+                const auto& model = mesh->getModel();
+                {
+                    // Map the buffer and write current world-view-projection matrix
+                    MapHelper<float4x4> CBConstants(m_immediateContext, m_bufferMatrixMesh, MAP_WRITE, MAP_FLAG_DISCARD);
+                    *CBConstants = (model * m_camera.GetViewMatrix() * m_camera.GetProjMatrix()).Transpose();
+                }
+
+                for (Mesh::Group& grp : groups)
+                {
+                    if(grp.m_textures.empty())
+                    {
+                        psoTransparency->getSRB().GetVariableByName(SHADER_TYPE_PIXEL, "g_TextureAlbedo")->
+                                Set(m_defaultTextures["redTransparent"]->GetDefaultView(Diligent::TEXTURE_VIEW_SHADER_RESOURCE));
+                    }
+                    else
+                    {
+                        psoTransparency->getSRB().GetVariableByName(SHADER_TYPE_PIXEL, "g_TextureAlbedo")->
+                                Set(grp.m_textures[0]->GetDefaultView(TEXTURE_VIEW_SHADER_RESOURCE));
+                    }
+
+                    Uint64  offset = 0;
+                    IBuffer* pBuffs[] = {grp.m_meshVertexBuffer};
+                    m_immediateContext->SetVertexBuffers(0, 1, pBuffs, &offset, RESOURCE_STATE_TRANSITION_MODE_TRANSITION,
+                                                         SET_VERTEX_BUFFERS_FLAG_RESET);
+                    m_immediateContext->SetIndexBuffer(grp.m_meshIndexBuffer, 0, RESOURCE_STATE_TRANSITION_MODE_TRANSITION);
+                    m_immediateContext->CommitShaderResources(&psoTransparency->getSRB(), RESOURCE_STATE_TRANSITION_MODE_TRANSITION);
+
+                    DrawIndexedAttribs DrawAttrs; // This is an indexed draw call
+                    DrawAttrs.IndexType  = VT_UINT32; // Index type
+                    DrawAttrs.NumIndices = grp.m_indices.size();
+                    // Verify the state of vertex and index buffers as well as consistence of
+                    // render targets and correctness of draw command arguments
+                    DrawAttrs.Flags = DRAW_FLAG_VERIFY_ALL;
+                    m_immediateContext->DrawIndexed(DrawAttrs);
+                }
             }
         }
-    }
-
-
     //Compose phase
     {
         DrawAttribs attribs;
@@ -872,17 +942,27 @@ void Engine::createZprepassPipeline()
     desc.DSVFormat = m_swapChain->GetDesc().DepthBufferFormat;
     desc.DepthStencilDesc.DepthEnable = True;
     desc.DepthStencilDesc.DepthWriteEnable = True;
-    desc.DepthStencilDesc.DepthFunc = Diligent::COMPARISON_FUNC_ALWAYS;
+    desc.DepthStencilDesc.DepthFunc = Diligent::COMPARISON_FUNC_LESS;
     desc.PrimitiveTopology = PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
     desc.RasterizerDesc.CullMode = Diligent::CULL_MODE_BACK;
 
     //m_registeredTexturesForDebug.emplace_back(m_swapChain->GetDepthBufferDSV()->GetTexture());
-
-    eastl::vector<LayoutElement> layoutElements = {
-            LayoutElement(0, 0, 3, VT_FLOAT32, False),
-            LayoutElement (1, 0, 3, VT_FLOAT32, True),
-            LayoutElement (2, 0, 2, VT_FLOAT32, False)
-    };
+    eastl::vector<LayoutElement> layoutElements;
+    if(m_isVertexPacked)
+    {
+        layoutElements= {
+                LayoutElement(0, 0, 2, Diligent::VT_UINT32, False),
+                LayoutElement (1, 0, 2, Diligent::VT_UINT32, False),
+        };
+    }
+    else
+    {
+        layoutElements = {
+                LayoutElement(0, 0, 3, VT_FLOAT32, False),
+                LayoutElement (1, 0, 3, VT_FLOAT32, True),
+                LayoutElement (2, 0, 2, VT_FLOAT32, False)
+        };
+    }
 
     eastl::vector<PipelineState::VarStruct> vars = {{SHADER_TYPE_VERTEX, "Constants", m_bufferMatrixMesh} };
 
@@ -985,13 +1065,25 @@ void Engine::createGBufferPipeline()
     desc.PrimitiveTopology            = PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
     desc.RasterizerDesc.CullMode      = Diligent::CULL_MODE_BACK;
     desc.DepthStencilDesc.DepthEnable = True;
+    desc.DepthStencilDesc.DepthWriteEnable = False;
     desc.DepthStencilDesc.DepthFunc = Diligent::COMPARISON_FUNC_EQUAL;
 
-    eastl::vector<LayoutElement> layoutElements = {
-            LayoutElement(0, 0, 3, VT_FLOAT32, False),
-            LayoutElement (1, 0, 3, VT_FLOAT32, True),
-            LayoutElement (2, 0, 2, VT_FLOAT32, False)
-    };
+    eastl::vector<LayoutElement> layoutElements;
+    if(m_isVertexPacked)
+    {
+        layoutElements= {
+                LayoutElement(0, 0, 2, Diligent::VT_UINT32, False),
+                LayoutElement (1, 0, 2, Diligent::VT_UINT32, False),
+        };
+    }
+    else
+    {
+        layoutElements = {
+                LayoutElement(0, 0, 3, VT_FLOAT32, False),
+                LayoutElement (1, 0, 3, VT_FLOAT32, True),
+                LayoutElement (2, 0, 2, VT_FLOAT32, False)
+        };
+    }
 
     eastl::vector<PipelineState::VarStruct> vars = {{SHADER_TYPE_VERTEX, "Constants", m_bufferMatrixMesh} };
 
@@ -1079,7 +1171,7 @@ void Engine::renderZPrepass()
     auto pDSV = m_gbuffer->GetTextureType(GBuffer::EGBufferType::Depth);// m_swapChain-
     m_immediateContext->SetRenderTargets(0, nullptr, pDSV->GetDefaultView(Diligent::TEXTURE_VIEW_DEPTH_STENCIL), RESOURCE_STATE_TRANSITION_MODE_TRANSITION);
     m_immediateContext->ClearDepthStencil(pDSV->GetDefaultView(Diligent::TEXTURE_VIEW_DEPTH_STENCIL)
-                                          , Diligent::CLEAR_DEPTH_FLAG, 0, 0, RESOURCE_STATE_TRANSITION_MODE_TRANSITION);
+                                          , Diligent::CLEAR_DEPTH_FLAG, 1, 0, RESOURCE_STATE_TRANSITION_MODE_TRANSITION);
 
     for(Mesh* m : m_meshOpaque)
     {
@@ -1109,5 +1201,67 @@ void Engine::renderZPrepass()
             //DrawAttrs.Flags = DRAW_FLAG_VERIFY_ALL;
             m_immediateContext->DrawIndexed(DrawAttrs);
         }
+    }
+}
+
+void Engine::renderCSM()
+{
+    auto center = float3(0);
+    auto frustrumCornersWS = m_camera.getFrustrumCornersWS();
+
+    for(const auto& corner : frustrumCornersWS)
+    {
+        center += corner;
+    }
+    center /= frustrumCornersWS.size();
+
+    // we are looking down at the center of the cascade
+    const auto lightView = float4x4::ViewFromBasis(center + m_lightPos, center, float3(0, 1, 0));
+
+    //transform into light space to find how big the camera frustrum should be
+    float3 min = float3(eastl::numeric_limits<float>::max());
+    float3 max = float3(eastl::numeric_limits<float>::min());
+
+    for(const auto& corner : frustrumCornersWS)
+    {
+        //todo add the eastl version of this
+        const float3 cornerLightSpace = lightView * corner;
+        min = std::min(min, cornerLightSpace);
+        max = std::max(max, cornerLightSpace);
+    }
+
+    //this scales the ortho view to include stuff behind the camera too
+    constexpr auto zMultiplier = 10.0f;
+    constexpr auto invZMultiplier = 1 / zMultiplier;
+
+    min.z *= min.z < 0 ? zMultiplier : invZMultiplier;
+    max.z *= max.z < 0 ? zMultiplier : invZMultiplier;
+
+    const auto lightProj = float4x4::OrthoOffCenter(min.x, max.x, min.y, max.y, min.z, max.z, m_device->GetDeviceInfo().IsGLDevice());
+
+    const auto lightVP = lightProj * lightView;
+}
+
+void Engine::createCSMPipeline()
+{
+    //for (uint i = 0; i < m_camera.getNbCascade(); ++i)
+    {
+        TextureDesc desc;
+        desc.Format = Diligent::TEX_FORMAT_R16_FLOAT;
+        //todo: add uav flag
+        desc.BindFlags = Diligent::BIND_SHADER_RESOURCE | Diligent::BIND_RENDER_TARGET;
+        desc.Height = 2048;
+        desc.Width = 2048;
+        desc.Depth = m_camera.getNbCascade();
+        desc.Type = Diligent::RESOURCE_DIM_TEX_2D_ARRAY;
+        eastl::string cascadeName("Cascade Maps");
+        desc.Name = cascadeName.c_str();
+        desc.Usage = Diligent::USAGE_DEFAULT;
+
+        RefCntAutoPtr<ITexture> tex;
+        m_device->CreateTexture(desc, nullptr, &tex);
+        m_cascadeTextures.emplace_back(tex);
+
+        //m_registeredTexturesForDebug.push_back(tex);
     }
 }

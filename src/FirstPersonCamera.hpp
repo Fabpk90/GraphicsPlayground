@@ -28,6 +28,7 @@
 #pragma once
 
 
+#include <EASTL/vector.h>
 #include "InputController.hpp"
 #include "Common/interface/BasicMath.hpp"
 #include "GraphicsTypes.h"
@@ -87,7 +88,35 @@ public:
         m_fHandness = IsRightHanded ? +1.f : -1.f;
     }
 
+    eastl::vector<float4> getFrustrumCornersWS()
+    {
+        const auto invProjView = (m_ProjMatrix * m_ViewMatrix).Inverse();
+        eastl::vector<float4> frustrumCorners(8);
+        for (int x = 0; x < 2; ++x)
+        {
+            for (int y = 0; y < 2; ++y)
+            {
+                for (int z = 0; z < 2; ++z)
+                {
+                    // NDC[-1; 1] to WS
+                    const float4 point = invProjView * float4(
+                            2.0f * x - 1.0f,
+                            2.0f * y - 1.0f,
+                            2.0f * z - 1.0f,
+                            1.0f);
+                    frustrumCorners.push_back(point / point.w);
+                }
+            }
+        }
+        return frustrumCorners;
+    }
+
+    uint getNbCascade() { return m_nbCascade;}
+
 protected:
+
+    uint m_nbCascade = 3;
+
     float4x4 GetReferenceRotiation() const;
 
     ProjectionAttribs m_ProjAttribs;

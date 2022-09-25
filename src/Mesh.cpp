@@ -2,11 +2,16 @@
 // Created by FanyMontpell on 03/09/2021.
 //
 
+#define GLOB_MEASURE_TIME 1
+
 #include "Mesh.h"
 #include "TextureUtilities.h"
 #include "Graphics/GraphicsTools/interface/MapHelper.hpp"
 #include "imgui.h"
-#include "Tracy.hpp"
+#include "meshoptimizer.h"
+#include "assimp/DefaultLogger.hpp"
+#include "tracy/Tracy.hpp"
+#include "Engine.h"
 #include <fstream>
 #include <assimp/Importer.hpp>
 #include <assimp/postprocess.h>
@@ -29,8 +34,11 @@ Mesh::Mesh(RefCntAutoPtr<IRenderDevice> _device, const char *_path,bool _needsAf
 
         if(file.good())
         {
+
             Assimp::Importer importer;
-            const aiScene* scene = importer.ReadFile(_path, aiProcessPreset_TargetRealtime_MaxQuality | aiProcess_GenBoundingBoxes);
+            //todo: read the doc about each config flag
+            const aiScene* scene = importer.ReadFile(_path, aiProcess_OptimizeMeshes | aiProcess_OptimizeGraph | aiProcess_GenNormals
+            | aiProcess_GenBoundingBoxes);
 
             m_meshes.reserve(scene->mNumMeshes);
 
@@ -46,10 +54,10 @@ Mesh::Mesh(RefCntAutoPtr<IRenderDevice> _device, const char *_path,bool _needsAf
         VertBuffDesc.Name = "Mesh vertex buffer";
         VertBuffDesc.Usage = USAGE_IMMUTABLE;
         VertBuffDesc.BindFlags = BIND_VERTEX_BUFFER;
-        VertBuffDesc.Size = sizeof(Vertex) * grp.m_vertices.size();
+        VertBuffDesc.Size = sizeof(VertexPacked) * grp.m_vertices.size();
         BufferData VBData;
         VBData.pData    = grp.m_vertices.data();
-        VBData.DataSize = grp.m_vertices.size() * sizeof (Vertex);// AVOID THIS PLEEEASE
+        VBData.DataSize = grp.m_vertices.size() * sizeof (VertexPacked);// AVOID THIS PLEEEASE
 
         m_device->CreateBuffer(VertBuffDesc, &VBData, &grp.m_meshVertexBuffer);
 
@@ -89,9 +97,14 @@ Mesh::Group Mesh::loadGroupFrom(const aiMesh& mesh, const aiScene *pScene)
     group.m_indices.reserve(mesh.mNumFaces);
 
       m_executor.silent_async([&](){
-          ZoneScopedN("Loading Vertices");
+          ZoneNamedN(loading, "Loading Vertices and Indices", true);
 
-          ZoneText(m_path.c_str(), m_path.size());
+          ZoneNameV( loading, m_path.c_str(), m_path.size());
+
+          eastl::vector<Vertex> vertices; // NOT packed
+          vertices.reserve(mesh.mNumVertices);
+
+          ZoneNamedN(vertInd, "Vertices and Indices", true);
             for(int i = 0; i < mesh.mNumVertices; ++i)
             {
                 Vertex v{};
@@ -105,31 +118,73 @@ Mesh::Group Mesh::loadGroupFrom(const aiMesh& mesh, const aiScene *pScene)
                 v.m_normal.z = mesh.mNormals[i].z;
 
                 //this query whether we have UV0
+                float2 uvs;
                 if(mesh.HasTextureCoords(0))
                 {
-                    v.m_uv.x = mesh.mTextureCoords[0][i].x;
-                    v.m_uv.y = mesh.mTextureCoords[0][i].y;
+                    uvs.x = mesh.mTextureCoords[0][i].x;
+                    uvs.y = mesh.mTextureCoords[0][i].y;
                 }
                 else
                     //this is called for cerberus as well, it SHOULDN'T
-                    v.m_uv.x = v.m_uv.y = 0;
+                    uvs.x = uvs.y = 0;
 
-                group.m_vertices.emplace_back(v);
+                v.m_uv = uvs;
+
+                vertices.emplace_back(v);
             }
-        });
 
-      m_executor.silent_async([&](){
-          ZoneScopedN("Loading Indices");
-          ZoneText(m_path.c_str(), m_path.size());
-            for (int i = 0; i < mesh.mNumFaces; ++i)
-            {
-                auto& face = mesh.mFaces[i];
+          for (int i = 0; i < mesh.mNumFaces; ++i)
+          {
+              auto& face = mesh.mFaces[i];
 
-                for (int j = 0; j < face.mNumIndices; ++j)
-                {
-                    group.m_indices.emplace_back(face.mIndices[j]);
-                }
-            }
+              for (int j = 0; j < face.mNumIndices; ++j)
+              {
+                  group.m_indices.emplace_back(face.mIndices[j]);
+              }
+          }
+          ZoneNamedN(optim, "Optimizations", true);
+         size_t index_count = group.m_indices.size();
+          eastl::vector<unsigned int> remap(index_count); // allocate temporary memory for the remap table of indices
+          size_t vertex_count = meshopt_generateVertexRemap(&remap[0], &group.m_indices[0], index_count, &vertices[0], index_count, sizeof(Vertex));
+          eastl::vector<Vertex> verticesToBeRemapped(vertex_count);
+          eastl::vector<uint> indicesToBeRemapped(index_count);
+
+          meshopt_remapIndexBuffer(&indicesToBeRemapped[0],  &group.m_indices[0], index_count, &remap[0]);
+          meshopt_remapVertexBuffer(&verticesToBeRemapped[0], &vertices[0], index_count, sizeof(Vertex), &remap[0]);
+
+          const size_t oldVertexCount = vertices.size();
+          const size_t oldIndexCount = group.m_indices.size();
+
+          vertices = verticesToBeRemapped;
+          group.m_indices = indicesToBeRemapped;
+#if defined(_DEBUG)
+          std::cout << "Previous vertex count " << oldVertexCount << " new vertex count " << vertices.size() << "\n"
+          << "Previous indices count " << oldIndexCount << " new indices count " << group.m_indices.size() << "\n"
+          << "Improvements: vertex " <<  (float)oldVertexCount / vertices.size() << " index " <<  (float)oldIndexCount / group.m_indices.size() << std::endl;
+#endif
+          meshopt_optimizeVertexCache(&group.m_indices[0], &group.m_indices[0], index_count, vertex_count);
+
+          meshopt_optimizeOverdraw(&group.m_indices[0], &group.m_indices[0], index_count,(&vertices[0].m_position.x), vertex_count, sizeof(Vertex), 1.05f);
+          meshopt_optimizeVertexFetch( &vertices[0], &group.m_indices[0], index_count,  &vertices[0], vertex_count, sizeof(Vertex));
+
+              ZoneNamedN(packing, "Quantization", true);
+              group.m_vertices.reserve(vertices.size());
+              for(const auto& v : vertices)
+              {
+                  VertexPacked vertPacked;
+                  vertPacked.m_position.x = meshopt_quantizeHalf(v.m_position.x);
+                  vertPacked.m_position.x = meshopt_quantizeHalf(v.m_position.y) |  vertPacked.m_position.x << 16;
+                  vertPacked.m_position.y = meshopt_quantizeHalf(v.m_position.z);
+
+                  // Z = cross(x, y)
+                  vertPacked.m_normaluv.x = meshopt_quantizeHalf(v.m_normal.x) << 16 | meshopt_quantizeHalf(v.m_normal.y);
+
+                  vertPacked.m_normaluv.y = meshopt_quantizeHalf(v.m_uv.x) << 16 | meshopt_quantizeHalf(v.m_uv.y);
+
+                  group.m_vertices.emplace_back(vertPacked);
+              }
+
+
         });
 
       m_executor.silent_async([&](){
@@ -225,69 +280,6 @@ void Mesh::addTexture(eastl::string& _path, Group& _group)
 void Mesh::addTexture(eastl::string &_path, int index)
 {
     addTexture(_path, m_meshes[index]);
-}
-
-void Mesh::draw(RefCntAutoPtr<IDeviceContext> _context, IShaderResourceBinding* _srb, FirstPersonCamera& _camera
-, RefCntAutoPtr<IBuffer> _bufferMatrices, eastl::unordered_map<eastl::string, RefCntAutoPtr<ITexture>>& _defaultTextures)
-{
-
-    {
-        // Map the buffer and write current world-view-projection matrix
-        MapHelper<float4x4> CBConstants(_context, _bufferMatrices, MAP_WRITE, MAP_FLAG_DISCARD);
-        *CBConstants = (m_model * _camera.GetViewMatrix() * _camera.GetProjMatrix()).Transpose();
-    }
-
-
-    for (Group& grp : m_meshes)
-    {
-        if(grp.m_textures.empty())
-        {
-            if(isTransparent())
-            {
-                _srb->GetVariableByName(SHADER_TYPE_PIXEL, "g_TextureAlbedo")->
-                        Set(_defaultTextures["redTransparent"]->GetDefaultView(Diligent::TEXTURE_VIEW_SHADER_RESOURCE));
-            }
-            else
-            {
-                _srb->GetVariableByName(SHADER_TYPE_PIXEL, "g_TextureAlbedo")->
-                        Set(_defaultTextures["albedo"]->GetDefaultView(Diligent::TEXTURE_VIEW_SHADER_RESOURCE));
-            }
-
-            if(auto* pVar = _srb->GetVariableByName(SHADER_TYPE_PIXEL, "g_TextureNormal"))
-            {
-                pVar->Set(_defaultTextures["normal"]->GetDefaultView(Diligent::TEXTURE_VIEW_SHADER_RESOURCE));
-            }
-        }
-        else
-        {
-            _srb->GetVariableByName(SHADER_TYPE_PIXEL, "g_TextureAlbedo")->
-                    Set(grp.m_textures[0]->GetDefaultView(TEXTURE_VIEW_SHADER_RESOURCE));
-
-            if(grp.m_textures.size() > 1)
-            {
-                _srb->GetVariableByName(SHADER_TYPE_PIXEL, "g_TextureNormal")->
-                        Set(grp.m_textures[1]->GetDefaultView(TEXTURE_VIEW_SHADER_RESOURCE));
-            }
-        }
-
-        Uint64  offset = 0;
-        IBuffer* pBuffs[] = {grp.m_meshVertexBuffer};
-        _context->SetVertexBuffers(0, 1, pBuffs, &offset, RESOURCE_STATE_TRANSITION_MODE_TRANSITION,
-                                             SET_VERTEX_BUFFERS_FLAG_RESET);
-        _context->SetIndexBuffer(grp.m_meshIndexBuffer, 0, RESOURCE_STATE_TRANSITION_MODE_TRANSITION);
-
-
-        _context->CommitShaderResources(_srb, RESOURCE_STATE_TRANSITION_MODE_TRANSITION);
-
-
-        DrawIndexedAttribs DrawAttrs; // This is an indexed draw call
-        DrawAttrs.IndexType  = VT_UINT32; // Index type
-        DrawAttrs.NumIndices = grp.m_indices.size();
-        // Verify the state of vertex and index buffers as well as consistence of
-        // render targets and correctness of draw command arguments
-        DrawAttrs.Flags = DRAW_FLAG_VERIFY_ALL;
-        _context->DrawIndexed(DrawAttrs);
-    }
 }
 
 void Mesh::drawInspector()
