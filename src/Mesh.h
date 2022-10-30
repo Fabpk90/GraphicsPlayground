@@ -17,6 +17,7 @@
 #include "taskflow/core/executor.hpp"
 #include "taskflow/taskflow.hpp"
 #include "Common/interface/AdvancedMath.hpp"
+#include "Graphics/GraphicsAccessories/interface/GraphicsAccessories.hpp"
 
 using namespace Diligent;
 
@@ -33,24 +34,48 @@ struct Vertex
     float2 m_uv;
 };
 
+class VertexDeclaration
+{
+public:
+    VertexDeclaration(eastl::vector<VALUE_TYPE>&& _types, size_t _nbElements)
+    : m_dataTypes(eastl::move(_types))
+    {
+        size_t sizeVertex = 0;
+
+        for(auto& type : m_dataTypes)
+        {
+            sizeVertex += GetValueSize(type);
+        }
+
+        m_data.reserve(_nbElements * sizeVertex);
+    }
+
+private:
+    eastl::vector<VALUE_TYPE> m_dataTypes;
+    eastl::vector<uint8_t> m_data;
+};
+
 class Mesh {
 public:
     struct Group
     {
         eastl::vector<VertexPacked> m_vertices;
+        eastl::vector<Vertex> m_verticesUnpacked;
         eastl::vector<uint> m_indices;
         eastl::vector<RefCntAutoPtr<ITexture>> m_textures;
-        BoundBox m_aabb;
+        BoundBox m_aabb; // In local space
 
         //This is not really optimal, as the data doesn't need to be both on CPU AND GPU
         RefCntAutoPtr<IBuffer> m_meshVertexBuffer;
         RefCntAutoPtr<IBuffer> m_meshIndexBuffer;
     };
 
-    void setTranslation(Vector3<float> vector3);
+    void setTranslation(Vector3<float>& vector3);
+    void setScale(float scale);
 
 public:
 
+    inline static eastl::hash_map<Mesh*, uint32_t > meshLoaded;
     inline static std::atomic<uint32_t> idCount = 0;
 
     Mesh(RefCntAutoPtr<IRenderDevice> _device, const char* _path, bool _needsAfterLoadedActions = false, float3 _position = float3(0), float3 _scale = float3(1)
@@ -109,7 +134,7 @@ private:
 
     float4x4 m_model;
     float3 m_position;
-    float3 m_scale;
+    float m_scale;
     float3 m_angle;
 
     Quaternion m_rotation;

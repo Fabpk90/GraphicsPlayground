@@ -3,6 +3,7 @@
 //
 
 #define GLOB_MEASURE_TIME 1
+#define AI_CONFIG_GLOBAL_SCALE_FACTOR_KEY 0.01
 
 #include "Mesh.h"
 #include "TextureUtilities.h"
@@ -12,6 +13,7 @@
 #include "assimp/DefaultLogger.hpp"
 #include "tracy/Tracy.hpp"
 #include "Engine.h"
+#include "assimp/ProgressHandler.hpp"
 #include <fstream>
 #include <assimp/Importer.hpp>
 #include <assimp/postprocess.h>
@@ -19,11 +21,22 @@
 
 using namespace Diligent;
 
+class ProgressHandler : public Assimp::ProgressHandler
+{
+public:
+    bool Update(float percentage) override
+    {
+        std::cout << percentage << " " << std::endl;
+        return true;
+    }
+};
+
 Mesh::Mesh(RefCntAutoPtr<IRenderDevice> _device, const char *_path,bool _needsAfterLoadedActions, float3 _position, float3 _scale, float3 _angle)
 : m_path(_path), m_position(_position), m_scale(_scale), m_device(eastl::move(_device)), m_angle(_angle), m_id(idCount++)
 {
-    ZoneScopedN("Loading Mesh");
-    ZoneText(m_path.c_str(), m_path.size());
+    ZoneScoped;
+    //ZoneScopedN("Loading Mesh");
+    ZoneName(m_path.c_str(), m_path.size());
     m_model = float4x4::Scale(m_scale) * float4x4::Translation(m_position);
 
     auto index = m_path.find_last_of('/') + 1; // +1 to include the /
@@ -34,16 +47,24 @@ Mesh::Mesh(RefCntAutoPtr<IRenderDevice> _device, const char *_path,bool _needsAf
 
         if(file.good())
         {
-
+            file.close();
             Assimp::Importer importer;
-            //todo: read the doc about each config flag
-            const aiScene* scene = importer.ReadFile(_path, aiProcess_OptimizeMeshes | aiProcess_OptimizeGraph | aiProcess_GenNormals
-            | aiProcess_GenBoundingBoxes);
+            //ProgressHandler handler;
+            //importer.SetProgressHandler(&handler);
+            const aiScene* scene;
+            {
+                ZoneNamedN(loading, "Loading File", true);
+                scene = importer.ReadFile(_path,
+                                          aiProcess_OptimizeMeshes | aiProcess_OptimizeGraph | aiProcess_GenNormals
+                                          | aiProcess_GenBoundingBoxes| aiProcess_Triangulate | aiProcess_GlobalScale);
+
+            }
 
             m_meshes.reserve(scene->mNumMeshes);
 
             recursivelyLoadNode(scene->mRootNode, scene);
 
+            importer.SetProgressHandler(nullptr);
             importer.FreeScene();
         }
     }
@@ -93,125 +114,122 @@ Mesh::Group Mesh::loadGroupFrom(const aiMesh& mesh, const aiScene *pScene)
 {
     Group group;
 
-    group.m_vertices.reserve(mesh.mNumVertices);
-    group.m_indices.reserve(mesh.mNumFaces);
+    m_executor.silent_async([&](){
+        ZoneScopedN("Loading Textures");
+        ZoneText(m_path.c_str(), m_path.size());
+        //we handle only one material per mesh for now
+        if(mesh.mMaterialIndex >= 0)
+        {
+            auto mat = pScene->mMaterials[mesh.mMaterialIndex];
 
-      m_executor.silent_async([&](){
-          ZoneNamedN(loading, "Loading Vertices and Indices", true);
-
-          ZoneNameV( loading, m_path.c_str(), m_path.size());
-
-          eastl::vector<Vertex> vertices; // NOT packed
-          vertices.reserve(mesh.mNumVertices);
-
-          ZoneNamedN(vertInd, "Vertices and Indices", true);
-            for(int i = 0; i < mesh.mNumVertices; ++i)
+            for(int typeID = 1; typeID < aiTextureType_UNKNOWN; ++typeID)
             {
-                Vertex v{};
+                auto type = static_cast<aiTextureType>(typeID);
 
-                v.m_position.x = mesh.mVertices[i].x;
-                v.m_position.y = mesh.mVertices[i].y;
-                v.m_position.z = mesh.mVertices[i].z;
-
-                v.m_normal.x = mesh.mNormals[i].x;
-                v.m_normal.y = mesh.mNormals[i].y;
-                v.m_normal.z = mesh.mNormals[i].z;
-
-                //this query whether we have UV0
-                float2 uvs;
-                if(mesh.HasTextureCoords(0))
+                for (int i = 0; i < mat->GetTextureCount(type); ++i)
                 {
-                    uvs.x = mesh.mTextureCoords[0][i].x;
-                    uvs.y = mesh.mTextureCoords[0][i].y;
-                }
-                else
-                    //this is called for cerberus as well, it SHOULDN'T
-                    uvs.x = uvs.y = 0;
+                    aiString texPath;
 
-                v.m_uv = uvs;
-
-                vertices.emplace_back(v);
-            }
-
-          for (int i = 0; i < mesh.mNumFaces; ++i)
-          {
-              auto& face = mesh.mFaces[i];
-
-              for (int j = 0; j < face.mNumIndices; ++j)
-              {
-                  group.m_indices.emplace_back(face.mIndices[j]);
-              }
-          }
-          ZoneNamedN(optim, "Optimizations", true);
-         size_t index_count = group.m_indices.size();
-          eastl::vector<unsigned int> remap(index_count); // allocate temporary memory for the remap table of indices
-          size_t vertex_count = meshopt_generateVertexRemap(&remap[0], &group.m_indices[0], index_count, &vertices[0], index_count, sizeof(Vertex));
-          eastl::vector<Vertex> verticesToBeRemapped(vertex_count);
-          eastl::vector<uint> indicesToBeRemapped(index_count);
-
-          meshopt_remapIndexBuffer(&indicesToBeRemapped[0],  &group.m_indices[0], index_count, &remap[0]);
-          meshopt_remapVertexBuffer(&verticesToBeRemapped[0], &vertices[0], index_count, sizeof(Vertex), &remap[0]);
-
-          const size_t oldVertexCount = vertices.size();
-          const size_t oldIndexCount = group.m_indices.size();
-
-          vertices = verticesToBeRemapped;
-          group.m_indices = indicesToBeRemapped;
-#if defined(_DEBUG)
-          std::cout << "Previous vertex count " << oldVertexCount << " new vertex count " << vertices.size() << "\n"
-          << "Previous indices count " << oldIndexCount << " new indices count " << group.m_indices.size() << "\n"
-          << "Improvements: vertex " <<  (float)oldVertexCount / vertices.size() << " index " <<  (float)oldIndexCount / group.m_indices.size() << std::endl;
-#endif
-          meshopt_optimizeVertexCache(&group.m_indices[0], &group.m_indices[0], index_count, vertex_count);
-
-          meshopt_optimizeOverdraw(&group.m_indices[0], &group.m_indices[0], index_count,(&vertices[0].m_position.x), vertex_count, sizeof(Vertex), 1.05f);
-          meshopt_optimizeVertexFetch( &vertices[0], &group.m_indices[0], index_count,  &vertices[0], vertex_count, sizeof(Vertex));
-
-              ZoneNamedN(packing, "Quantization", true);
-              group.m_vertices.reserve(vertices.size());
-              for(const auto& v : vertices)
-              {
-                  VertexPacked vertPacked;
-                  vertPacked.m_position.x = meshopt_quantizeHalf(v.m_position.x);
-                  vertPacked.m_position.x = meshopt_quantizeHalf(v.m_position.y) |  vertPacked.m_position.x << 16;
-                  vertPacked.m_position.y = meshopt_quantizeHalf(v.m_position.z);
-
-                  // Z = cross(x, y)
-                  vertPacked.m_normaluv.x = meshopt_quantizeHalf(v.m_normal.x) << 16 | meshopt_quantizeHalf(v.m_normal.y);
-
-                  vertPacked.m_normaluv.y = meshopt_quantizeHalf(v.m_uv.x) << 16 | meshopt_quantizeHalf(v.m_uv.y);
-
-                  group.m_vertices.emplace_back(vertPacked);
-              }
-
-
-        });
-
-      m_executor.silent_async([&](){
-          ZoneScopedN("Loading Textures");
-          ZoneText(m_path.c_str(), m_path.size());
-            //we handle only one material per mesh for now
-            if(mesh.mMaterialIndex >= 0)
-            {
-                auto mat = pScene->mMaterials[mesh.mMaterialIndex];
-
-                for(int typeID = 1; typeID < aiTextureType_UNKNOWN; ++typeID)
-                {
-                    auto type = static_cast<aiTextureType>(typeID);
-
-                    for (int i = 0; i < mat->GetTextureCount(type); ++i)
+                    if(mat->GetTexture(type, i, &texPath) == aiReturn_SUCCESS)
                     {
-                        aiString texPath;
-
-                        if(mat->GetTexture(type, i, &texPath) == aiReturn_SUCCESS)
-                        {
-                            eastl::string str = texPath.C_Str();
-                            addTexture(str, group);
-                        }
+                        eastl::string str = texPath.C_Str();
+                        addTexture(str, group);
                     }
                 }
             }
-        });
+        }
+    });
+    m_executor.silent_async([&](){
+      ZoneNamedN(loading, "Loading Vertices and Indices", true);
+      ZoneTextV(loading, m_path.c_str(), m_path.size());
+      group.m_vertices.reserve(mesh.mNumVertices);
+      group.m_indices.reserve(mesh.mNumFaces);
+
+      eastl::vector<Vertex> vertices; // NOT packed
+      vertices.reserve(mesh.mNumVertices);
+        for(int i = 0; i < mesh.mNumVertices; ++i)
+        {
+            Vertex v{};
+
+            v.m_position.x = mesh.mVertices[i].x;
+            v.m_position.y = mesh.mVertices[i].y;
+            v.m_position.z = mesh.mVertices[i].z;
+            if(mesh.HasNormals())
+            {
+                v.m_normal.x = mesh.mNormals[i].x;
+                v.m_normal.y = mesh.mNormals[i].y;
+                v.m_normal.z = mesh.mNormals[i].z;
+            }
+
+            //this query whether we have UV0
+            float2 uvs;
+            if(mesh.HasTextureCoords(0))
+            {
+                uvs.x = mesh.mTextureCoords[0][i].x;
+                uvs.y = mesh.mTextureCoords[0][i].y;
+            }
+            else
+                //this is called for cerberus as well, it SHOULDN'T
+                uvs.x = uvs.y = 0;
+
+            v.m_uv = uvs;
+
+            vertices.emplace_back(v);
+        }
+
+      for (int i = 0; i < mesh.mNumFaces; ++i)
+      {
+          auto& face = mesh.mFaces[i];
+
+          for (int j = 0; j < face.mNumIndices; ++j)
+          {
+              group.m_indices.emplace_back(face.mIndices[j]);
+          }
+      }
+      ZoneNamedN(optim, "Optimizations", true);
+      ZoneTextV(optim, m_path.c_str(), m_path.size());
+     size_t index_count = group.m_indices.size();
+      eastl::vector<unsigned int> remap(index_count); // allocate temporary memory for the remap table of indices
+      size_t vertex_count = meshopt_generateVertexRemap(&remap[0], &group.m_indices[0], index_count, &vertices[0], index_count, sizeof(Vertex));
+      eastl::vector<Vertex> verticesToBeRemapped(vertex_count);
+      eastl::vector<uint> indicesToBeRemapped(index_count);
+
+      meshopt_remapIndexBuffer(&indicesToBeRemapped[0],  &group.m_indices[0], index_count, &remap[0]);
+      meshopt_remapVertexBuffer(&verticesToBeRemapped[0], &vertices[0], index_count, sizeof(Vertex), &remap[0]);
+
+      const size_t oldVertexCount = vertices.size();
+      const size_t oldIndexCount = group.m_indices.size();
+
+      vertices = verticesToBeRemapped;
+      group.m_indices = indicesToBeRemapped;
+#if defined(_DEBUG)
+      std::cout << "Previous vertex count " << oldVertexCount << " new vertex count " << vertices.size() << "\n"
+      << "Previous indices count " << oldIndexCount << " new indices count " << group.m_indices.size() << "\n"
+      << "Improvements: vertex " <<  (float)oldVertexCount / vertices.size() << " index " <<  (float)oldIndexCount / group.m_indices.size() << std::endl;
+#endif
+      meshopt_optimizeVertexCache(&group.m_indices[0], &group.m_indices[0], index_count, vertex_count);
+
+      meshopt_optimizeOverdraw(&group.m_indices[0], &group.m_indices[0], index_count,(&vertices[0].m_position.x), vertex_count, sizeof(Vertex), 1.05f);
+      meshopt_optimizeVertexFetch( &vertices[0], &group.m_indices[0], index_count,  &vertices[0], vertex_count, sizeof(Vertex));
+
+          ZoneNamedN(packing, "Quantization", true);
+          ZoneTextV(packing, m_path.c_str(), m_path.size());
+          group.m_vertices.reserve(vertices.size());
+          for(const auto& v : vertices)
+          {
+              VertexPacked vertPacked;
+              vertPacked.m_position.x = meshopt_quantizeHalf(v.m_position.x);
+              vertPacked.m_position.x = meshopt_quantizeHalf(v.m_position.y) |  vertPacked.m_position.x << 16;
+              vertPacked.m_position.y = meshopt_quantizeHalf(v.m_position.z);
+
+              // Z = cross(x, y)
+              vertPacked.m_normaluv.x = meshopt_quantizeHalf(v.m_normal.x) << 16 | meshopt_quantizeHalf(v.m_normal.y);
+
+              vertPacked.m_normaluv.y = meshopt_quantizeHalf(v.m_uv.x) << 16 | meshopt_quantizeHalf(v.m_uv.y);
+
+              group.m_vertices.emplace_back(vertPacked);
+          }
+    });
 
     group.m_aabb.Min = float3(mesh.mAABB.mMin.x, mesh.mAABB.mMin.y, mesh.mAABB.mMin.z);
     group.m_aabb.Max = float3(mesh.mAABB.mMax.x, mesh.mAABB.mMax.y, mesh.mAABB.mMax.z);
@@ -331,7 +349,23 @@ bool Mesh::isClicked(const float4x4& _mvp, const float3 &RayOrigin, const float3
     return false;
 }
 
-void Mesh::setTranslation(Vector3<float> vector3)
+
+void Mesh::setTranslation(Vector3<float>& vector3)
 {
     m_position = vector3;
+}
+
+void Mesh::setScale(float scale)
+{
+    const auto reverseScale = 1 / m_scale;
+    m_scale = scale;
+
+    for(auto& grp : m_meshes)
+    {
+        grp.m_aabb.Max *= reverseScale;
+        grp.m_aabb.Min *= reverseScale;
+
+        grp.m_aabb.Max *= m_scale;
+        grp.m_aabb.Min *= m_scale;
+    }
 }

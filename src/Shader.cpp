@@ -1,23 +1,29 @@
 #define NOMINMAX
 #include "Shader.h"
 
+#include <utility>
 #include "Engine.h"
 
-Shader::Shader(const char* _path, PIPELINE_TYPE _type) : m_path(_path), m_type(_type)
-, m_hashes({0, 0})
+Shader::Shader(const char* _path, PIPELINE_TYPE _type, eastl::vector<eastl::pair<eastl::string, eastl::string>>  _macros) : m_path(_path), m_type(_type)
+, m_hashes({0, 0}), m_macros(eastl::move(_macros))
 {
 	m_info.pShaderSourceStreamFactory = Engine::instance->getShaderStreamFactory();
 	// Tell the system that the shader source code is in HLSL.
 	// For OpenGL, the engine will convert this into GLSL under the hood
     m_info.SourceLanguage = SHADER_SOURCE_LANGUAGE_HLSL;
-	// OpenGL backend requires emulated combined HLSL texture samplers (g_Texture + g_Texture_sampler combination)
-    m_info.UseCombinedTextureSamplers = true;
+    m_info.ShaderCompiler = Diligent::SHADER_COMPILER_DXC;
+    m_info.CompileFlags = SHADER_COMPILE_FLAG_ENABLE_UNBOUNDED_ARRAYS;
+    m_info.HLSLVersion = ShaderVersion{ 6, 5 };
+    m_info.Desc.UseCombinedTextureSamplers = true;
 
-    eastl::array<ShaderMacro, 2> macros = {
-            ShaderMacro("USE_PACKED_VERTEX", Engine::instance->AreVerticesPacked() ? "1" : "0"),
-            {}
-    };
-    m_info.Macros = macros.data();
+    m_macroHelper.AddShaderMacro("USE_PACKED_VERTEX", Engine::instance->AreVerticesPacked() ? "1" : "0");
+    m_macroHelper.AddShaderMacro("HEAP_MAX_TEXTURES", Engine::HEAP_MAX_TEXTURES);
+    m_macroHelper.AddShaderMacro("HEAP_MAX_BUFFERS", Engine::HEAP_MAX_BUFFERS);
+    for (const auto& macro: m_macros)
+    {
+        m_macroHelper.AddShaderMacro(macro.first.c_str(), macro.second.c_str());
+    }
+    m_info.Macros = m_macroHelper;
 
     reload();
 }
@@ -96,6 +102,7 @@ bool Shader::reload()
                 {
                     m_info.Desc.ShaderType = SHADER_TYPE_PIXEL;
                     m_info.EntryPoint = "main";
+                    m_info.Desc.Name = path;
                     m_info.Source = buffer.c_str();
                     m_info.SourceLength = buffer.size();
                     device->CreateShader(m_info, &pPS);
@@ -142,6 +149,7 @@ bool Shader::reload()
                 {
                     m_info.Desc.ShaderType = SHADER_TYPE_COMPUTE;
                     m_info.EntryPoint = "main";
+                    m_info.Desc.Name = path;
                     m_info.Source = buffer.c_str();
                     m_info.SourceLength = buffer.size();
 

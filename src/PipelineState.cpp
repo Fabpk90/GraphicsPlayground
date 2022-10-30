@@ -5,14 +5,16 @@
 #include "PipelineState.hpp"
 #include "tracy/Tracy.hpp"
 
-PipelineState::PipelineState(RefCntAutoPtr<IRenderDevice> _device, const char* _name, PIPELINE_TYPE _type, const char* _shaderPath, eastl::vector<VarStruct> _staticVars, eastl::vector<VarStruct> _dynamicVars
+PipelineState::PipelineState(RefCntAutoPtr<IRenderDevice> _device, const char* _name, PIPELINE_TYPE _type, const char* _shaderPath,
+                             eastl::vector<eastl::pair<eastl::string, eastl::string>> _macros
+                             , eastl::vector<VarStruct> _staticVars, eastl::vector<VarStruct> _dynamicVars
                              , GraphicsPipelineDesc _graphicsDesc
 , eastl::vector<LayoutElement> _layoutElements)
 : m_device(eastl::move(_device)), m_type(_type), m_layoutElements(eastl::move(_layoutElements))
 , m_staticVars(eastl::move(_staticVars)), m_dynamicVars(eastl::move(_dynamicVars))
 {
     ZoneScopedN("Load Pipeline");
-    m_pipelineShader.Attach(new Shader(_shaderPath, _type));
+    m_pipelineShader.Attach(new Shader(_shaderPath, _type, _macros));
     PipelineStateCreateInfo* PSO;
 
     if(_type == Diligent::PIPELINE_TYPE_GRAPHICS)
@@ -148,13 +150,13 @@ void PipelineState::setStaticVars(const eastl::vector<VarStruct> &_vars)
     for (auto& var : _vars)
     {
         //checks if the var is still needed by the shader
-        if(auto* pVar = m_pipeline->GetStaticVariableByName(var.m_type, var.m_name))
+        if(auto* pVar = m_pipeline->GetStaticVariableByName(var.m_type, var.m_name.c_str()))
         {
             pVar->Set(var.m_object);
         }
         else
         {
-            std::cout << "The var" << var.m_name << " is set but not used in the shader" << std::endl;
+            std::cout << "The var" << var.m_name.c_str() << " is set but not used in the shader" << std::endl;
         }
     }
 }
@@ -163,9 +165,13 @@ void PipelineState::setDynamicVars(const eastl::vector<VarStruct> &_vars)
 {
     for (auto& var : _vars)
     {
-        if(auto* pVar = m_SRB->GetVariableByName(var.m_type, var.m_name))
+        if(auto* pVar = m_SRB->GetVariableByName(var.m_type, var.m_name.c_str()))
         {
             pVar->Set(var.m_object);
+        }
+        else
+        {
+            std::cout << "Tried to add " << var.m_name.c_str() << " to the dynamic vars but failed" << std::endl;
         }
     }
 }

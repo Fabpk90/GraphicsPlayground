@@ -16,7 +16,6 @@
 #include <taskflow/taskflow.hpp>
 
 #include "imgui.h"
-#include "Mesh.h"
 #include "FirstPersonCamera.hpp"
 #include "Common/interface/BasicMath.hpp"
 #include "GraphicsTypes.h"
@@ -40,8 +39,16 @@ struct Constants
     float4 m_camPos;
 };
 
+struct CSMProperties
+{
+    eastl::array<float4x4, FirstPersonCamera::getNbCascade()> VP;
+    eastl::array<float, FirstPersonCamera::getNbCascade()> cascadeFarPlanes;
+    eastl::array<uint3, FirstPersonCamera::getNbCascade()> padding;
+};
+
 class RayTracing;
 class FrameGraph;
+class Mesh;
 
 struct Group;
 
@@ -78,6 +85,7 @@ public:
     void present();
 
     RefCntAutoPtr<IRenderDevice>& getDevice() {return m_device;}
+    RefCntAutoPtr<IDeviceContext>& getContext() {return m_immediateContext;}
     RefCntAutoPtr<IShaderSourceInputStreamFactory> getShaderStreamFactory() { return m_ShaderSourceFactory; }
 
     void addDebugTexture(ITexture* _tex) { m_registeredTexturesForDebug.push_back(_tex);}
@@ -89,6 +97,9 @@ public:
     }
 
     bool AreVerticesPacked() { return m_isVertexPacked;}
+
+    static constexpr uint HEAP_MAX_TEXTURES = 1024;
+    static constexpr uint HEAP_MAX_BUFFERS = 1024;
 
 public:
     InputControllerWin32 m_inputController;
@@ -115,6 +126,7 @@ private:
     static constexpr const char* PSO_TRANSPARENCY = "transparency";
     static constexpr const char* PSO_TRANSPARENCY_COMPOSE = "transparency_compose";
     static constexpr const char* PSO_ZPREPASS = "zprepass";
+    static constexpr const char* PSO_CSM = "csm";
 
     eastl::unordered_map<eastl::string, eastl::unique_ptr<PipelineState>> m_pipelines;
 
@@ -141,6 +153,10 @@ private:
     FirstPersonCamera m_camera;
 
     RefCntAutoPtr<IBuffer> m_bufferLighting;
+    RefCntAutoPtr<IBuffer> m_bufferCSMProperties;
+
+    eastl::vector<RefCntAutoPtr<ITexture>> m_heapTextures;
+    eastl::vector<RefCntAutoPtr<IBuffer>> m_heapBuffers;
 
     eastl::vector<RefCntAutoPtr<ITexture>> m_cascadeTextures;
 
@@ -152,6 +168,8 @@ private:
     eastl::unique_ptr<ScopedQueryHelper> m_pOcclusionQuery;
     eastl::unique_ptr<ScopedQueryHelper> m_pDurationQuery;
     eastl::unique_ptr<DurationQueryHelper> m_pDurationFromTimestamps;
+
+    class DebugShape* m_debugShape;
 
     QueryDataPipelineStatistics m_PipelineStatsData;
     QueryDataOcclusion          m_OcclusionData;

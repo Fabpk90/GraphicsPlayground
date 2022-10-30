@@ -174,6 +174,8 @@ void FirstPersonCamera::SetProjAttribs(Float32           NearClipPlane,
     m_ProjAttribs.PreTransform  = SrfPreTransform;
     m_ProjAttribs.IsGL          = IsGL;
 
+    m_slicesNearFarShadow = { FarClipPlane / 50, FarClipPlane / 25, FarClipPlane / 10 };
+
     float XScale, YScale;
     if (SrfPreTransform == SURFACE_TRANSFORM_ROTATE_90 ||
         SrfPreTransform == SURFACE_TRANSFORM_ROTATE_270 ||
@@ -204,5 +206,62 @@ void FirstPersonCamera::SetSpeedUpScales(Float32 SpeedUpScale, Float32 SuperSpee
     m_fSpeedUpScale      = SpeedUpScale;
     m_fSuperSpeedUpScale = SuperSpeedUpScale;
 }
+
+    eastl::array<float4x4, 3> FirstPersonCamera::getSliceViewProjMatrix(float3 lightDir)
+    {
+        eastl::array<float4x4, 3> slicesVP;
+        float near = m_ProjAttribs.NearClipPlane;
+
+        for(int i = 0; i < m_slicesNearFarShadow.size(); ++i)
+        {
+            auto center = float3(0);
+            float far = m_slicesNearFarShadow[i];
+            float4x4 sliceProj = float4x4::Projection(m_ProjAttribs.FOV, m_ProjAttribs.AspectRatio, near, far, m_ProjAttribs.IsGL);
+            const auto frustrumCornersWS = getFrustrumCornersWS(sliceProj);
+            for(const auto& corner : frustrumCornersWS)
+            {
+                center += corner;
+            }
+
+            center /= frustrumCornersWS.size();
+
+            //Look at
+            //TODO: add this as an helper
+            const auto up = float3(0, 1, 0);
+            const auto lightSpaceZ = lightDir; // lightDir is forward of sun view
+
+            float3 lightSpaceX = normalize(cross( lightSpaceZ, up));
+            float3 lightSpaceY = normalize(cross(lightSpaceX, lightSpaceZ));
+
+            // we are looking down at the center of the cascade
+            const auto lightView = float4x4::ViewFromBasis(lightSpaceX, lightSpaceY, lightSpaceZ);
+
+            //transform into light space to find how big the camera frustrum should be
+            auto min = float3(eastl::numeric_limits<float>::max());
+            auto max = float3(eastl::numeric_limits<float>::min());
+
+            for(const auto& corner : frustrumCornersWS)
+            {
+                //todo add the eastl version of this
+                const float3 cornerLightSpace = lightView * corner;
+                min = std::min(min, cornerLightSpace);
+                max = std::max(max, cornerLightSpace);
+            }
+
+            //this scales the ortho view to include stuff behind the camera too
+            constexpr auto zMultiplier = 10.0f;
+            constexpr auto invZMultiplier = 1 / zMultiplier;
+
+            min.z *= min.z < 0 ? invZMultiplier : zMultiplier;
+            max.z *= max.z < 0 ? invZMultiplier : zMultiplier;
+
+            const auto lightProj = float4x4::OrthoOffCenter(min.x, max.x, min.y, max.y, min.z, max.z, false);
+
+            slicesVP[i] = lightView * lightProj;
+            near += far;
+        }
+
+        return slicesVP;
+    }
 
 } // namespace Diligent

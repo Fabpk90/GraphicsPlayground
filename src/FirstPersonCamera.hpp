@@ -29,6 +29,7 @@
 
 
 #include <EASTL/vector.h>
+#include <EASTL/array.h>
 #include "InputController.hpp"
 #include "Common/interface/BasicMath.hpp"
 #include "GraphicsTypes.h"
@@ -88,15 +89,19 @@ public:
         m_fHandness = IsRightHanded ? +1.f : -1.f;
     }
 
-    eastl::vector<float4> getFrustrumCornersWS()
+    eastl::array<float4x4, 3> getSliceViewProjMatrix(float3 lightDir);
+
+    eastl::array<float4, 8> getFrustrumCornersWS(float4x4& projMatrix)
     {
-        const auto invProjView = (m_ProjMatrix * m_ViewMatrix).Inverse();
-        eastl::vector<float4> frustrumCorners(8);
-        for (int x = 0; x < 2; ++x)
+        // we're using the same view matrix because we have *slices/ of the camera
+        const auto invProjView = (m_ViewMatrix * projMatrix).Transpose().Inverse();
+        eastl::array<float4, 8> frustrumCorners;
+
+        for (uint x = 0; x < 2; ++x)
         {
-            for (int y = 0; y < 2; ++y)
+            for (uint y = 0; y < 2; ++y)
             {
-                for (int z = 0; z < 2; ++z)
+                for (uint z = 0; z < 2; ++z)
                 {
                     // NDC[-1; 1] to WS
                     const float4 point = invProjView * float4(
@@ -104,20 +109,19 @@ public:
                             2.0f * y - 1.0f,
                             2.0f * z - 1.0f,
                             1.0f);
-                    frustrumCorners.push_back(point / point.w);
+                    frustrumCorners[(x * 2 * 2) + (y * 2) + z] = point / point.w;
                 }
             }
         }
         return frustrumCorners;
     }
 
-    uint getNbCascade() { return m_nbCascade;}
-
+    [[nodiscard]] static constexpr uint getNbCascade() { return m_slicesNearFarShadow.size();}
+    static eastl::array<float, 3> getCascadeFarPlane() { return m_slicesNearFarShadow; }
+    inline static eastl::array<float, 3> m_slicesNearFarShadow;
 protected:
 
-    uint m_nbCascade = 3;
-
-    float4x4 GetReferenceRotiation() const;
+    [[nodiscard]] float4x4 GetReferenceRotiation() const;
 
     ProjectionAttribs m_ProjAttribs;
 

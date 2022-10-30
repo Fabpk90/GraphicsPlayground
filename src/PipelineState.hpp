@@ -22,12 +22,13 @@ public:
     struct VarStruct
     {
         SHADER_TYPE m_type;
-        const char* m_name;
+        eastl::string m_name;
         IDeviceObject* m_object;
     };
-
-    PipelineState(RefCntAutoPtr<IRenderDevice> _device, const char* _name, PIPELINE_TYPE _type, const char* _shaderPath, eastl::vector<VarStruct> _staticVars = {}
-    , eastl::vector<VarStruct> _dynamicVars = {}, GraphicsPipelineDesc _graphicsDesc = {}, eastl::vector<LayoutElement> _layoutElements = {});
+//todo: refacto this, make this a builder class maybe ?
+    PipelineState(RefCntAutoPtr<IRenderDevice> _device, const char* _name, PIPELINE_TYPE _type, const char* _shaderPath, eastl::vector<eastl::pair<eastl::string, eastl::string>> _macros = {},
+                  eastl::vector<VarStruct> _staticVars = {}, eastl::vector<VarStruct> _dynamicVars = {}
+                  , GraphicsPipelineDesc _graphicsDesc = {}, eastl::vector<LayoutElement> _layoutElements = {});
 
     ~PipelineState();
 
