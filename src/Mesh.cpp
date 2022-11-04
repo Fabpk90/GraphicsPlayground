@@ -3,7 +3,7 @@
 //
 
 #define GLOB_MEASURE_TIME 1
-#define AI_CONFIG_GLOBAL_SCALE_FACTOR_KEY 0.01
+#define AI_CONFIG_GLOBAL_SCALE_FACTOR_KEY 1
 
 #include "Mesh.h"
 #include "TextureUtilities.h"
@@ -24,20 +24,31 @@ using namespace Diligent;
 class ProgressHandler : public Assimp::ProgressHandler
 {
 public:
+
+    explicit ProgressHandler(const char* _name) {
+        m_id = Engine::instance->addImportProgress(_name);
+    };
+    ~ProgressHandler() override {
+        Engine::instance->removeImportProgress(m_id);
+    }
+
     bool Update(float percentage) override
     {
-        std::cout << percentage << " " << std::endl;
+        Engine::instance->updateImportProgress(m_id, percentage);
         return true;
     }
+
+private:
+    uint32_t m_id;
 };
 
-Mesh::Mesh(RefCntAutoPtr<IRenderDevice> _device, const char *_path,bool _needsAfterLoadedActions, float3 _position, float3 _scale, float3 _angle)
+Mesh::Mesh(RefCntAutoPtr<IRenderDevice> _device, const char *_path,bool _needsAfterLoadedActions, float3 _position, float _scale, float3 _angle)
 : m_path(_path), m_position(_position), m_scale(_scale), m_device(eastl::move(_device)), m_angle(_angle), m_id(idCount++)
 {
     ZoneScoped;
     //ZoneScopedN("Loading Mesh");
     ZoneName(m_path.c_str(), m_path.size());
-    m_model = float4x4::Scale(m_scale) * float4x4::Translation(m_position);
+    m_model = float4x4::Scale(1.0f) * float4x4::Translation(m_position);
 
     auto index = m_path.find_last_of('/') + 1; // +1 to include the /
     m_path = m_path.substr(0, index);
@@ -49,8 +60,8 @@ Mesh::Mesh(RefCntAutoPtr<IRenderDevice> _device, const char *_path,bool _needsAf
         {
             file.close();
             Assimp::Importer importer;
-            //ProgressHandler handler;
-            //importer.SetProgressHandler(&handler);
+            ProgressHandler handler(_path);
+            importer.SetProgressHandler(&handler);
             const aiScene* scene;
             {
                 ZoneNamedN(loading, "Loading File", true);
@@ -309,14 +320,16 @@ void Mesh::drawInspector()
         {
             hasChanged = true;
         }
-        if(ImGui::DragFloat3("Scale", m_scale.Data()))
+        float scale = m_scale;
+        if(ImGui::DragFloat("Scale", &scale))
         {
             hasChanged = true;
+            setScale(scale);
         }
         if(ImGui::DragFloat3("Rotation", m_angle.Data()))
         {
             hasChanged = true;
-            //todo: UPDATE QUATERNION
+            //todo @fsantoro : UPDATE QUATERNION
         }
     ImGui::PopID();
     if(hasChanged)

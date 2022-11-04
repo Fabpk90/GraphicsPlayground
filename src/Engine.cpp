@@ -32,6 +32,7 @@
 #include "GPUMarkerScoped.hpp"
 #include "Mesh.h"
 #include "debug/DebugShape.hpp"
+#include "util/UIProgressingBars.hpp"
 
 Engine* Engine::instance = nullptr;
 
@@ -173,9 +174,8 @@ void Engine::createResources()
         });
 
         m_executor.silent_async([&](){
-            auto* m = new Mesh(m_device, "mesh/cerberus/Cerberus_LP.fbx", true);
+            auto* m = new Mesh(m_device, "mesh/cerberus/Cerberus_LP.fbx", true, float3(0, 0, 10), 0.01);
 
-            m->getModel() *= float4x4::Translation(0, 0, 10);
             m->addTexture("textures/Cerberus_N.tga", 0);
             m->setIsLoaded(true);
 
@@ -337,6 +337,20 @@ void Engine::uiPass()
     showStats();
     showFrameTimeGraph();
     showGizmos();
+
+    ImGui::Begin("Progress Indicators");
+
+    const ImU32 col = ImGui::GetColorU32(ImGuiCol_ButtonHovered);
+    const ImU32 bg = ImGui::GetColorU32(ImGuiCol_Button);
+    for(auto& nameAndProgress : m_importProgressMap)
+    {
+        ImGui::Text("%s %d", nameAndProgress.second.first.c_str(), nameAndProgress.first);
+        ImGui::Spinner("##spinner", 15, 6, col);
+        ImGui::SameLine();
+        ImGui::BufferingBar("##buffer_bar", nameAndProgress.second.second, ImVec2(400, 6), bg, col);
+    }
+
+    ImGui::End();
 
     m_imguiRenderer->Render(m_immediateContext);
 }
@@ -871,7 +885,8 @@ void Engine::showGizmos()
 
     Im3d::Vec3 translation = Im3d::Vec3(m_clickedMesh->getTranslation().x, m_clickedMesh->getTranslation().y, m_clickedMesh->getTranslation().z);
     Im3d::Mat3 rotation(1.0f);
-    Im3d::Vec3 scale(m_clickedMesh->getScale().x, m_clickedMesh->getScale().y, m_clickedMesh->getScale().z);
+    Im3d::Vec3 scale(1.0f);
+    //Im3d:: scale(m_clickedMesh->getScale().x, m_clickedMesh->getScale().y, m_clickedMesh->getScale().z);
 
     Im3d::PushMatrix(Im3d::Mat4(translation, rotation, scale));
 
@@ -1410,4 +1425,22 @@ void Engine::createCSMPipeline()
                                                                       "csm", eastl::vector<eastl::pair<eastl::string, eastl::string>>(),
                                                                       vars,
                                                                       eastl::vector<PipelineState::VarStruct>(), desc, layoutElements);
+}
+
+uint32_t Engine::addImportProgress(const char* _name)
+{
+    std::scoped_lock lock(m_mutexImportProgress);
+    m_importProgressMap[m_idImporterProgress].first = _name;
+    m_importProgressMap[m_idImporterProgress].second = 0;
+    return m_idImporterProgress++;
+}
+
+void Engine::updateImportProgress(uint32_t _id, float _percentage)
+{
+    m_importProgressMap[_id].second = _percentage;
+}
+
+void Engine::removeImportProgress(uint32_t _id)
+{
+    m_importProgressMap.erase(m_importProgressMap.find_as(_id));
 }

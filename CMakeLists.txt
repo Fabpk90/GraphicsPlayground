@@ -27,7 +27,7 @@ include_directories(external/taskflow/)
 include_directories(external/WinPix/)
 
 file(GLOB_RECURSE ENGINE_SOURCES src/*.cpp src/*.c)
-file(GLOB_RECURSE ENGINE_HEADERS external/*.h external/*.hpp external/*.inl /src/*.hpp)
+file(GLOB_RECURSE ENGINE_HEADERS external/*.h external/*.hpp external/*.inl /src/*.hpp src/util/*.h src/util/*.hpp)
 
 link_directories(${CMAKE_SOURCE_DIR}/external/lib)
 

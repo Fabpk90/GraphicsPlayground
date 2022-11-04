@@ -101,6 +101,16 @@ public:
     static constexpr uint HEAP_MAX_TEXTURES = 1024;
     static constexpr uint HEAP_MAX_BUFFERS = 1024;
 
+    //todo fsantoro: make a debug class or something for this, it's clutter to the rendering
+    uint32_t addImportProgress(const char* _name);
+    void updateImportProgress(uint32_t _id, float _percentage);
+    void removeImportProgress(uint32_t _id);
+
+    typedef eastl::pair<eastl::string, float> ProgressPair;
+    std::mutex m_mutexImportProgress;
+    eastl::hash_map<uint32_t, ProgressPair> m_importProgressMap; // this is public for convenience, should be encapsulated when a class is designed for the progresion
+    uint32_t m_idImporterProgress = 0;
+
 public:
     InputControllerWin32 m_inputController;
     ImGuiImplWin32* m_imguiRenderer;

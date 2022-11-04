@@ -78,7 +78,7 @@ public:
     inline static eastl::hash_map<Mesh*, uint32_t > meshLoaded;
     inline static std::atomic<uint32_t> idCount = 0;
 
-    Mesh(RefCntAutoPtr<IRenderDevice> _device, const char* _path, bool _needsAfterLoadedActions = false, float3 _position = float3(0), float3 _scale = float3(1)
+    Mesh(RefCntAutoPtr<IRenderDevice> _device, const char* _path, bool _needsAfterLoadedActions = false, float3 _position = float3(0), float _scale = 1
             , float3 _angle = float3(0.0f));
 
 
@@ -117,7 +117,7 @@ public:
                    float&          ExitDist);
 
     float3& getTranslation() { return m_position;}
-    float3& getScale() { return m_scale;}
+    float getScale() { return m_scale;}
     float4x4 getRotation() { return m_rotation.ToMatrix();}
     //void setRotation(const float4x4& _rotation) { m_rotation.MakeQuaternion()}
 
