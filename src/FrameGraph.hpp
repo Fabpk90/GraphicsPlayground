@@ -64,6 +64,14 @@ public:
 
     void startSetup();
     void startCompiling();
+
+    ~FrameGraph()
+    {
+        for(auto* pass : m_renderpasses)
+        {
+            delete pass;
+        }
+    }
 private:
     eastl::vector<RenderPass*> m_renderpasses;
     RenderPassResources m_resources;

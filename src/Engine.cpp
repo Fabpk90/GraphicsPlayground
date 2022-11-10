@@ -174,7 +174,7 @@ void Engine::createResources()
         });
 
         m_executor.silent_async([&](){
-            auto* m = new Mesh(m_device, "mesh/cerberus/Cerberus_LP.fbx", true, float3(0, 0, 10), 0.01);
+            auto* m = new Mesh(m_device, "mesh/cerberus/Cerberus_LP.fbx", true, float3(0, 0, 0), 1.0f);
 
             m->addTexture("textures/Cerberus_N.tga", 0);
             m->setIsLoaded(true);
@@ -204,6 +204,7 @@ void Engine::createResources()
         desc.Height = 720;
         desc.BindFlags = Diligent::BIND_SHADER_RESOURCE | Diligent::BIND_RENDER_TARGET;
 
+        //TODO fsantoro add here if we read, write or write read the resource
         _data.m_tex = _frameBuilder.createTexture(desc);
 
         }, [=](const Data & _data, const RenderPassResources & _renderResources)
@@ -294,7 +295,8 @@ void Engine::render()
         {
             DebugShape::ShapeParams params;
             params.m_position = mesh->getTranslation();
-            params.m_size = length((mesh->getGroups()[0].m_aabb.Max - mesh->getGroups()[0].m_aabb.Min));
+            const auto aabb = mesh->getBoundingBox();
+            params.m_size = length((aabb.Max - aabb.Min));
 
             m_debugShape->addCubeAt(params);
         }
@@ -322,7 +324,8 @@ void Engine::uiPass()
     m_imguiRenderer->NewFrame(m_width, m_height, SURFACE_TRANSFORM_IDENTITY);
     ImGui::Begin("Inspector");
     ImGui::Text("%f %f %f", m_camera.GetPos().x, m_camera.GetPos().y, m_camera.GetPos().z);
-    ImGui::SliderFloat4("Pos light: ", m_lightPos.Data(), -5, 5);
+    ImGui::InputFloat4("Pos light: ", m_lightPos.Data());
+    ImGui::ColorEdit3("Light color: ", m_lightColor.Data());
 
     for(Mesh* m : m_meshes)
     {
@@ -424,7 +427,10 @@ void Engine::renderLighting()
 
     {
         MapHelper<Constants> mapBuffer(m_immediateContext, m_bufferLighting, Diligent::MAP_WRITE, Diligent::MAP_FLAG_DISCARD);
+        mapBuffer->m_cameraInvProj = m_camera.GetProjMatrix().Inverse().Transpose();
+        mapBuffer->m_cameraToWorld = (m_camera.GetWorldMatrix() * m_camera.GetViewMatrix()).Inverse().Transpose();
         mapBuffer->m_lightPos = m_lightPos;
+        mapBuffer->m_lightColor = m_lightColor;
         mapBuffer->m_camPos = m_camera.GetPos();
         mapBuffer->m_params = float4(m_width, m_height, camParams.NearClipPlane, camParams.FarClipPlane);
     }

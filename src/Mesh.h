@@ -116,6 +116,8 @@ public:
                    float&          EnterDist,
                    float&          ExitDist);
 
+    BoundBox getBoundingBox();
+
     float3& getTranslation() { return m_position;}
     float getScale() { return m_scale;}
     float4x4 getRotation() { return m_rotation.ToMatrix();}
@@ -137,7 +139,7 @@ private:
     float m_scale;
     float3 m_angle;
 
-    Quaternion m_rotation;
+    Quaternion m_rotation = Quaternion(0, 0, 0, 1);
 
     BoundBox m_aabb;
     bool m_isSelected;

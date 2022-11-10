@@ -5,6 +5,9 @@
 #define GLOB_MEASURE_TIME 1
 #define AI_CONFIG_GLOBAL_SCALE_FACTOR_KEY 1
 
+#define WIN32_LEAN_AND_MEAN
+#define NOMINMAX
+
 #include "Mesh.h"
 #include "TextureUtilities.h"
 #include "Graphics/GraphicsTools/interface/MapHelper.hpp"
@@ -18,6 +21,8 @@
 #include <assimp/Importer.hpp>
 #include <assimp/postprocess.h>
 #include <stb/stb_image.h>
+#include "Common/interface/BasicMath.hpp"
+
 
 using namespace Diligent;
 
@@ -42,13 +47,13 @@ private:
     uint32_t m_id;
 };
 
-Mesh::Mesh(RefCntAutoPtr<IRenderDevice> _device, const char *_path,bool _needsAfterLoadedActions, float3 _position, float _scale, float3 _angle)
+Mesh::Mesh(RefCntAutoPtr<IRenderDevice> _device, const char *_path, bool _needsAfterLoadedActions, float3 _position, float _scale, float3 _angle)
 : m_path(_path), m_position(_position), m_scale(_scale), m_device(eastl::move(_device)), m_angle(_angle), m_id(idCount++)
 {
     ZoneScoped;
     //ZoneScopedN("Loading Mesh");
     ZoneName(m_path.c_str(), m_path.size());
-    m_model = float4x4::Scale(1.0f) * float4x4::Translation(m_position);
+    m_model = float4x4::Scale(m_scale) * float4x4::Translation(m_position);
 
     auto index = m_path.find_last_of('/') + 1; // +1 to include the /
     m_path = m_path.substr(0, index);
@@ -320,21 +325,24 @@ void Mesh::drawInspector()
         {
             hasChanged = true;
         }
-        float scale = m_scale;
-        if(ImGui::DragFloat("Scale", &scale))
+        if(ImGui::DragFloat("Scale", &m_scale))
         {
             hasChanged = true;
-            setScale(scale);
         }
-        if(ImGui::DragFloat3("Rotation", m_angle.Data()))
+        if(ImGui::DragFloat3("Rotation", m_angle.Data(), 1.0f, 1.0f, 360.0f))
         {
             hasChanged = true;
-            //todo @fsantoro : UPDATE QUATERNION
+            m_angle /= 360.0f;
+
+            m_rotation *= Diligent::Quaternion::RotationFromAxisAngle(float3(1, 0, 0), m_angle.x);
+            m_rotation *= Diligent::Quaternion::RotationFromAxisAngle(float3(0, 1, 0), m_angle.y);
+            m_rotation *= Diligent::Quaternion::RotationFromAxisAngle(float3(0, 0, 1), m_angle.z);
         }
     ImGui::PopID();
     if(hasChanged)
     {
         //Update matrix
+        //todo fsantoro: cache this somewhere -> m_rotation.ToMatrix()
         m_model = float4x4::Scale(m_scale) * m_rotation.ToMatrix() * float4x4::Translation(m_position);
     }
 }
@@ -370,15 +378,21 @@ void Mesh::setTranslation(Vector3<float>& vector3)
 
 void Mesh::setScale(float scale)
 {
-    const auto reverseScale = 1 / m_scale;
     m_scale = scale;
+}
 
-    for(auto& grp : m_meshes)
+BoundBox Mesh::getBoundingBox()
+{
+    BoundBox aabb;
+    aabb.Min = float3(eastl::numeric_limits<float>::max());
+    aabb.Max = float3(eastl::numeric_limits<float>::min());
+
+    for(auto& mesh : m_meshes)
     {
-        grp.m_aabb.Max *= reverseScale;
-        grp.m_aabb.Min *= reverseScale;
-
-        grp.m_aabb.Max *= m_scale;
-        grp.m_aabb.Min *= m_scale;
+        BoundBox b = mesh.m_aabb;;
+        aabb.Min = std::min(b.Min * m_scale, aabb.Min);
+        aabb.Max = std::max(b.Max * m_scale, aabb.Max);
     }
+
+    return aabb;
 }

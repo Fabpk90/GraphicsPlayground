@@ -34,9 +34,12 @@ using namespace Diligent;
 
 struct Constants
 {
+    float4x4 m_cameraInvProj;
+    float4x4 m_cameraToWorld;
     float4 m_params;
     float4 m_lightPos;
     float4 m_camPos;
+    float3 m_lightColor;
 };
 
 struct CSMProperties
@@ -171,6 +174,7 @@ private:
     eastl::vector<RefCntAutoPtr<ITexture>> m_cascadeTextures;
 
     float4 m_lightPos = float4(1);
+    float3 m_lightColor = float3(0.5, 0.2, 0.5);
 
     RenderDocHook* m_renderdoc = nullptr;
 

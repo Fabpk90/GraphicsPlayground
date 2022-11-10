@@ -15,6 +15,7 @@ class RenderPassResources;
 class RenderPass
 {
 public:
+    virtual ~RenderPass() = default;
     virtual void setup() = 0;
     virtual void execute() = 0;
 };
