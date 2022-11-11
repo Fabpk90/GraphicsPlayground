@@ -324,7 +324,7 @@ void Engine::uiPass()
     m_imguiRenderer->NewFrame(m_width, m_height, SURFACE_TRANSFORM_IDENTITY);
     ImGui::Begin("Inspector");
     ImGui::Text("%f %f %f", m_camera.GetPos().x, m_camera.GetPos().y, m_camera.GetPos().z);
-    ImGui::InputFloat4("Pos light: ", m_lightPos.Data());
+    ImGui::DragFloat4("Pos light: ", m_lightPos.Data(), 1.0f);
     ImGui::ColorEdit3("Light color: ", m_lightColor.Data());
 
     for(Mesh* m : m_meshes)
@@ -340,20 +340,7 @@ void Engine::uiPass()
     showStats();
     showFrameTimeGraph();
     showGizmos();
-
-    ImGui::Begin("Progress Indicators");
-
-    const ImU32 col = ImGui::GetColorU32(ImGuiCol_ButtonHovered);
-    const ImU32 bg = ImGui::GetColorU32(ImGuiCol_Button);
-    for(auto& nameAndProgress : m_importProgressMap)
-    {
-        ImGui::Text("%s %d", nameAndProgress.second.first.c_str(), nameAndProgress.first);
-        ImGui::Spinner("##spinner", 15, 6, col);
-        ImGui::SameLine();
-        ImGui::BufferingBar("##buffer_bar", nameAndProgress.second.second, ImVec2(400, 6), bg, col);
-    }
-
-    ImGui::End();
+    showProgressIndicators();
 
     m_imguiRenderer->Render(m_immediateContext);
 }
@@ -1449,4 +1436,21 @@ void Engine::updateImportProgress(uint32_t _id, float _percentage)
 void Engine::removeImportProgress(uint32_t _id)
 {
     m_importProgressMap.erase(m_importProgressMap.find_as(_id));
+}
+
+void Engine::showProgressIndicators()
+{
+    ImGui::Begin("Progress Indicators");
+
+    const ImU32 col = ImGui::GetColorU32(ImGuiCol_ButtonHovered);
+    const ImU32 bg = ImGui::GetColorU32(ImGuiCol_Button);
+    for(auto& nameAndProgress : m_importProgressMap)
+    {
+        ImGui::Text("%s %d", nameAndProgress.second.first.c_str(), nameAndProgress.first);
+        ImGui::Spinner("##spinner", 15, 6, col);
+        ImGui::SameLine();
+        ImGui::BufferingBar("##buffer_bar", nameAndProgress.second.second, ImVec2(400, 6), bg, col);
+    }
+
+    ImGui::End();
 }

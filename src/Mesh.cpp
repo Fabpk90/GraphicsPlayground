@@ -332,11 +332,11 @@ void Mesh::drawInspector()
         if(ImGui::DragFloat3("Rotation", m_angle.Data(), 1.0f, 1.0f, 360.0f))
         {
             hasChanged = true;
-            m_angle /= 360.0f;
+            float3 angles = m_angle * (PI / 180.0f); // TODO fsantoro: add this as an helper (DegreesToRadians)
 
-            m_rotation *= Diligent::Quaternion::RotationFromAxisAngle(float3(1, 0, 0), m_angle.x);
-            m_rotation *= Diligent::Quaternion::RotationFromAxisAngle(float3(0, 1, 0), m_angle.y);
-            m_rotation *= Diligent::Quaternion::RotationFromAxisAngle(float3(0, 0, 1), m_angle.z);
+            m_rotation = Diligent::Quaternion::RotationFromAxisAngle(float3(1, 0, 0), angles.x);
+            m_rotation *= Diligent::Quaternion::RotationFromAxisAngle(float3(0, 1, 0), angles.y);
+            m_rotation *= Diligent::Quaternion::RotationFromAxisAngle(float3(0, 0, 1), angles.z);
         }
     ImGui::PopID();
     if(hasChanged)

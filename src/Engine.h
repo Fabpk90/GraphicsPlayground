@@ -239,6 +239,8 @@ private:
     void renderCSM();
 
     void createCSMPipeline();
+
+    void showProgressIndicators();
 };
 
 
