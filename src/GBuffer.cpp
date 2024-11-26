@@ -16,11 +16,11 @@ void GBuffer::createTextures()
     for (auto& tex: m_textures)
     {
 	    const auto type = static_cast<EGBufferType>(i++);
-        const TEXTURE_FORMAT format = GetTextureFormat(type);
+        const TEXTURE_FORMAT format = getTextureFormat(type);
 
         BIND_FLAGS flags = getBindFlags(type);
 
-        TextureDesc desc{};
+        TextureDesc desc;
         desc.Name = getName(type);
         desc.Type = RESOURCE_DIM_TEX_2D;
         desc.BindFlags = flags;
@@ -28,7 +28,7 @@ void GBuffer::createTextures()
         desc.Width = m_size.x;
         desc.Height = m_size.y;
 
-        ITexture* texture = nullptr;
+        RefCntAutoPtr<ITexture> texture;
         Engine::instance->getDevice()->CreateTexture(desc, nullptr, &texture);
         Engine::instance->addDebugTexture(texture);
         tex = { texture, type };
@@ -38,7 +38,7 @@ void GBuffer::createTextures()
 void GBuffer::resize(float2 _size)
 {
     m_size = _size;
-    auto device = Engine::instance->getDevice();
+    const auto device = Engine::instance->getDevice();
 
     if(!device) return;
 
@@ -57,16 +57,13 @@ BIND_FLAGS GBuffer::getBindFlags(const GBuffer::EGBufferType type)
 {
     switch (type)
     {
-
         case EGBufferType::Albedo:
+        case EGBufferType::Roughness:
         case EGBufferType::Normal:
-            return BIND_RENDER_TARGET | BIND_SHADER_RESOURCE;
+        case EGBufferType::Output:
+            return BIND_RENDER_TARGET | BIND_SHADER_RESOURCE | BIND_UNORDERED_ACCESS;
         case EGBufferType::Depth:
             return BIND_SHADER_RESOURCE | BIND_DEPTH_STENCIL;
-            break;
-        case EGBufferType::Output:
-            return BIND_UNORDERED_ACCESS | BIND_SHADER_RESOURCE | BIND_RENDER_TARGET; // added BIND_SHADER_RESOURCE for debug
-            break;
         case EGBufferType::Max:
             break;
     }

@@ -5,10 +5,10 @@
 #include "PipelineState.hpp"
 #include "tracy/Tracy.hpp"
 
-PipelineState::PipelineState(RefCntAutoPtr<IRenderDevice> _device, const char* _name, PIPELINE_TYPE _type, const char* _shaderPath,
-                             eastl::vector<eastl::pair<eastl::string, eastl::string>> _macros
+PipelineState::PipelineState(const RefCntAutoPtr<IRenderDevice>& _device, const char* _name, PIPELINE_TYPE _type, const char* _shaderPath,
+                             const eastl::vector<eastl::pair<eastl::string, eastl::string>>&_macros
                              , eastl::vector<VarStruct> _staticVars, eastl::vector<VarStruct> _dynamicVars
-                             , GraphicsPipelineDesc _graphicsDesc
+                             , const GraphicsPipelineDesc&_graphicsDesc
 , eastl::vector<LayoutElement> _layoutElements)
 : m_device(eastl::move(_device)), m_type(_type), m_layoutElements(eastl::move(_layoutElements))
 , m_staticVars(eastl::move(_staticVars)), m_dynamicVars(eastl::move(_dynamicVars))
@@ -125,6 +125,8 @@ void PipelineState::reload()
 
     ZoneScopedN("Reload Pipeline");
 
+    const auto oldSrb = m_SRB;
+
     m_pipeline = RefCntAutoPtr<IPipelineState>();
     m_shaderStages.clear();
 
@@ -142,6 +144,8 @@ void PipelineState::reload()
 
     createPipeline(m_type, PSO);
 
+    m_SRB = oldSrb;
+
     std::cout << "Correctly reloaded PSO " << PSO->PSODesc.Name << std::endl;
 }
 
@@ -156,7 +160,7 @@ void PipelineState::setStaticVars(const eastl::vector<VarStruct> &_vars)
         }
         else
         {
-            std::cout << "The var" << var.m_name.c_str() << " is set but not used in the shader" << std::endl;
+            std::cout << "The var " << var.m_name.c_str() << " is set but not used in the shader" << std::endl;
         }
     }
 }

@@ -13,64 +13,58 @@
 
 using namespace Diligent;
 
+//todo fsantoro pack RT
 class GBuffer
 {
 public:
     enum class EGBufferType{
         Albedo = 0,
         Normal,
+        Roughness,
         Depth,
         Output,
         Max
     };
 
     GBuffer(float2 _size);
-    ~GBuffer()
-    {
-	    for (const auto & texture : m_textures)
-	    {
-             texture.m_tex->Release();
-	    }
-    }
 
-    static constexpr char* getName(EGBufferType _type)
+    static constexpr const char* getName(EGBufferType _type)
     {
         switch (_type)
         {
 
             case EGBufferType::Albedo:
                 return "GBuffer Albedo";
-                break;
             case EGBufferType::Normal:
                 return "GBuffer Normal";
-                break;
             case EGBufferType::Depth:
                 return "GBuffer Depth";
-                break;
+            case EGBufferType::Roughness:
+                return "GBuffer Roughness";
             case EGBufferType::Output:
                 return "GBuffer Output";
             case EGBufferType::Max:
                 return "";
-                break;
         }
 
         return "";
     }
 
-    static TEXTURE_FORMAT GetTextureFormat(EGBufferType _type)
+    static TEXTURE_FORMAT getTextureFormat(EGBufferType _type)
     {
 	    switch (_type) {
         case EGBufferType::Albedo:
             return TEX_FORMAT_RGBA8_UNORM_SRGB;
         case EGBufferType::Output:
-            return  TEX_FORMAT_RGBA8_UNORM_SRGB;
-        case EGBufferType::Normal: return TEX_FORMAT_RGBA8_UNORM; //todo: compress octahedron
+            return TEX_FORMAT_RGBA8_UNORM_SRGB;
+        case EGBufferType::Normal: return Diligent::TEX_FORMAT_RGBA8_SNORM; //todo: compress octahedron
+        case EGBufferType::Roughness: return TEX_FORMAT_R8_UNORM; //todo: compress octahedron
         case EGBufferType::Depth: return  TEX_FORMAT_D32_FLOAT;
 	    default: return TEX_FORMAT_BGRA8_UNORM;
 	    }
     }
 
-    ITexture* GetTextureType(EGBufferType _type)
+    [[nodiscard]] ITexture* getTextureOfType(EGBufferType _type) const
     {
         return m_textures[static_cast<uint>(_type)].m_tex;
     }
@@ -80,7 +74,7 @@ public:
 private:
 
     struct GTexture{
-        ITexture* m_tex;
+        RefCntAutoPtr<ITexture> m_tex;
         EGBufferType m_type;
     };
 
@@ -90,7 +84,7 @@ private:
 
     void createTextures();
 
-    BIND_FLAGS getBindFlags(const EGBufferType type);
+    static BIND_FLAGS getBindFlags(EGBufferType type);
 };
 
 

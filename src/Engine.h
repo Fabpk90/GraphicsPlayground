@@ -25,6 +25,7 @@
 #include "ImGuiImplWin32.hpp"
 #include "Common/interface/RefCntAutoPtr.hpp"
 #include "GBuffer.hpp"
+#include "Mesh.h"
 #include "RenderDocHook.hpp"
 #include "Graphics/GraphicsTools/interface/ScopedQueryHelper.hpp"
 #include "Graphics/GraphicsTools/interface/DurationQueryHelper.hpp"
@@ -35,11 +36,26 @@ using namespace Diligent;
 struct Constants
 {
     float4x4 m_cameraInvProj;
-    float4x4 m_cameraToWorld;
+    float4x4 m_cameraInvView;
     float4 m_params;
     float4 m_lightPos;
     float4 m_camPos;
     float3 m_lightColor;
+};
+
+struct SPDConstants
+{
+    uint32_t    mips;
+    uint32_t    numWorkGroups;
+    int2        workGroupOffset;
+    float2      invInputSize;
+};
+
+static eastl::vector<LayoutElement> layoutElementsPacked{
+        {LayoutElement(0, 0, 2, Diligent::VT_UINT32, False),
+         LayoutElement(1, 0, 2, Diligent::VT_UINT32, False),
+         LayoutElement(2, 0, 1, Diligent::VT_UINT32, False),
+         }
 };
 
 struct CSMProperties
@@ -49,9 +65,15 @@ struct CSMProperties
     eastl::array<uint3, FirstPersonCamera::getNbCascade()> padding;
 };
 
+struct spdConstants
+{
+    int mips;
+    uint numWorkGroups;
+    uint2 workGroupOffset;
+};
+
 class RayTracing;
 class FrameGraph;
-class Mesh;
 
 struct Group;
 
@@ -73,6 +95,12 @@ public:
     static RENDER_DEVICE_TYPE constexpr getRenderType() { return Diligent::RENDER_DEVICE_TYPE_D3D12;}
     void windowResize(int _width, int _height);
     bool initializeDiligentEngine(HWND hwnd);
+
+    void createDepthMinMaxPipeline();
+
+    void createPrecomputeIrradiancePipeline();
+    void renderPrecomputeIrradiance();
+
     void createResources();
 
     void createLightingPipeline();
@@ -83,6 +111,8 @@ public:
     void endCollectingStats();
     void initStatsResources();
     void showStats();
+
+    void renderDepthMinMax();
 
     void render();
     void present();
@@ -99,7 +129,10 @@ public:
             m_registeredTexturesForDebug.erase(it);
     }
 
-    bool AreVerticesPacked() { return m_isVertexPacked;}
+    bool areVerticesPacked() { return m_isVertexPacked;}
+
+    GBuffer& getGBuffer() const { return *m_gbuffer;}
+    FirstPersonCamera& getCamera() {return m_camera;}
 
     static constexpr uint HEAP_MAX_TEXTURES = 1024;
     static constexpr uint HEAP_MAX_BUFFERS = 1024;
@@ -140,6 +173,11 @@ private:
     static constexpr const char* PSO_TRANSPARENCY_COMPOSE = "transparency_compose";
     static constexpr const char* PSO_ZPREPASS = "zprepass";
     static constexpr const char* PSO_CSM = "csm";
+    static constexpr const char* PSO_SKYDOME_CREATE = "skydome";
+    static constexpr const char* PSO_CUBEMAP = "cubemap";
+    static constexpr const char* PSO_DEPTH_MIN = "depth_min";
+    static constexpr const char* PSO_DEPTH_MAX = "depth_max";
+    static constexpr const char* PSO_PRECOMPUTE_IRRADIANCE = "precompute_irradiance";
 
     eastl::unordered_map<eastl::string, eastl::unique_ptr<PipelineState>> m_pipelines;
 
@@ -159,9 +197,13 @@ private:
 
     RefCntAutoPtr<IBuffer> m_bufferMatrixMesh;
 
-    eastl::vector<Mesh*> m_meshes; // Convenient vector to list all meshes
+    std::mutex m_mutexAddMesh;
+    eastl::vector<Mesh*> m_meshToAdd; // will be added in the correct vector at the start of the next frame
+    eastl::vector< Mesh*> m_meshes; // Convenient vector to list all meshes
     eastl::vector_set<Mesh*> m_meshOpaque;
     eastl::vector_set<Mesh*> m_meshTransparent;
+
+    eastl::vector<Mesh*> m_meshesSortedAndCulled;
 
     FirstPersonCamera m_camera;
 
@@ -173,7 +215,7 @@ private:
 
     eastl::vector<RefCntAutoPtr<ITexture>> m_cascadeTextures;
 
-    float4 m_lightPos = float4(1);
+    float3 m_lightPos = float3(1, 1, 0);
     float3 m_lightColor = float3(0.5, 0.2, 0.5);
 
     RenderDocHook* m_renderdoc = nullptr;
@@ -206,6 +248,20 @@ private:
 
     FrameGraph* m_frameGraph;
 
+    RefCntAutoPtr<IBuffer> m_bufferVerticesSkyDome;
+    RefCntAutoPtr<IBuffer> m_bufferIndicesSkyDome;
+
+    eastl::array<RefCntAutoPtr<ITexture>, 6> m_skyBoxCubeMap;
+    eastl::array<float4x4, 6> m_skyBoxViewMatrices;
+
+    RefCntAutoPtr<ITexture> m_skyBoxCubeTexture;
+    eastl::array<RefCntAutoPtr<ITexture>, 6>  m_irradiancePrecomputed; // This will contain the cube map convolution
+
+    RefCntAutoPtr<IBuffer> m_SPDConstantBuffer;
+    RefCntAutoPtr<ITexture> m_SPDTextureOutputArray;
+    RefCntAutoPtr<ITexture> m_SPDTexture6;
+    RefCntAutoPtr<IBuffer> m_SPDGlobalAtomicBuffer;
+
     void createDefaultTextures();
     void uiPass();
 
@@ -228,7 +284,6 @@ private:
     void Im3dNewFrame();
 
     void AddMesh(Mesh* _mesh);
-    void SortMeshes();
 
     void renderGBuffer();
 
@@ -241,6 +296,17 @@ private:
     void createCSMPipeline();
 
     void showProgressIndicators();
+
+    void frustrumCulling();
+
+    void createSkydomeTexturePipeline();
+
+    void renderCubeMapInTextures();
+
+    void createCubeMapPipeline();
+    void renderCubeMap();
+
+    void SortMeshes();
 };
 
 

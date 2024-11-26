@@ -85,6 +85,13 @@ InputKeys MapCameraKeyWnd(UINT nKey)
         case 'R':
             return InputKeys::R;
 
+        case VK_F1:
+            return InputKeys::F1;
+        case VK_F2:
+            return InputKeys::F2;
+        case VK_F3:
+            return InputKeys::F3;
+
         default:
             return InputKeys::Unknown;
     }

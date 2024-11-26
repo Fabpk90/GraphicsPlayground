@@ -1,3 +1,9 @@
+
+extern "C" { __declspec(dllexport) extern const unsigned D3D12SDKVersion = 614;}
+
+extern "C" { __declspec(dllexport) extern const char* D3D12SDKPath = u8".\\..\\external\\AgilitySDK\\build\\native\\bin\\x64\\"; }
+
+
 #include <mimalloc.h>
 #include <mimalloc-new-delete.h>
 void* operator new[](size_t size, const char* pName, int flags, unsigned debugFlags, const char* file, int line)

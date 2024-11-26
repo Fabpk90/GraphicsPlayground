@@ -19,12 +19,16 @@
 #include "Common/interface/AdvancedMath.hpp"
 #include "Graphics/GraphicsAccessories/interface/GraphicsAccessories.hpp"
 
+
+static constexpr uint32_t VERSION = 9;
+
 using namespace Diligent;
 
 struct VertexPacked
 {
     uint2 m_position;
     uint2 m_normaluv; // x 8 LMB y 8, z = cross(x,y)
+    uint m_tangent;
 };
 
 struct Vertex
@@ -32,46 +36,37 @@ struct Vertex
     float3 m_position;
     float3 m_normal;
     float2 m_uv;
-};
-
-class VertexDeclaration
-{
-public:
-    VertexDeclaration(eastl::vector<VALUE_TYPE>&& _types, size_t _nbElements)
-    : m_dataTypes(eastl::move(_types))
-    {
-        size_t sizeVertex = 0;
-
-        for(auto& type : m_dataTypes)
-        {
-            sizeVertex += GetValueSize(type);
-        }
-
-        m_data.reserve(_nbElements * sizeVertex);
-    }
-
-private:
-    eastl::vector<VALUE_TYPE> m_dataTypes;
-    eastl::vector<uint8_t> m_data;
+    float3 m_tangent;
 };
 
 class Mesh {
 public:
     struct Group
     {
+        eastl::string m_name;
         eastl::vector<VertexPacked> m_vertices;
-        eastl::vector<Vertex> m_verticesUnpacked;
-        eastl::vector<uint> m_indices;
+        eastl::vector<uint16_t> m_indices;
+        eastl::vector<float3> m_verticesPosRaytrace; // used for raytracing
+        eastl::vector<uint32_t> m_indicesRaytrace;
         eastl::vector<RefCntAutoPtr<ITexture>> m_textures;
+        eastl::vector<unsigned char*> m_texturesData; // used to save textures on disk
         BoundBox m_aabb; // In local space
 
-        //This is not really optimal, as the data doesn't need to be both on CPU AND GPU
+        RefCntAutoPtr<IPipelineState> m_pipeline;
+
         RefCntAutoPtr<IBuffer> m_meshVertexBuffer;
-        RefCntAutoPtr<IBuffer> m_meshIndexBuffer;
+        RefCntAutoPtr<IBuffer> m_meshVertexBufferUnpacked;
+        RefCntAutoPtr<IBuffer> m_meshIndexBuffer; // This should be index zith the pri;itiveindex zhen rqytrqcing
+
+        // TODO @fsantoro uv + normal
+        RefCntAutoPtr<IBuffer> m_meshRaytraceData;
     };
 
     void setTranslation(Vector3<float>& vector3);
     void setScale(float scale);
+    void save();
+
+    const char *getName();
 
 public:
 
@@ -81,8 +76,18 @@ public:
     Mesh(RefCntAutoPtr<IRenderDevice> _device, const char* _path, bool _needsAfterLoadedActions = false, float3 _position = float3(0), float _scale = 1
             , float3 _angle = float3(0.0f));
 
+    ~Mesh()
+    {
+        for(auto& mesh : m_meshes)
+        {
+            for(const auto* texData : mesh.m_texturesData)
+            {
+                delete[] texData;
+            }
+        }
+    }
 
-    bool operator<(Mesh* _other)
+    bool operator<(Mesh* _other) const
     {
         return length(m_position) < length(_other->m_position);
     }
@@ -98,6 +103,8 @@ public:
     //todo: make a string_view version of this
     void addTexture(eastl::string& _path, Group& _group);
     void addTexture(eastl::string& _path, int index);
+
+    //todo fsantoro, handle multiple mesh models
 
     void drawInspector();
 
@@ -139,14 +146,15 @@ private:
     float m_scale;
     float3 m_angle;
 
-    Quaternion m_rotation = Quaternion(0, 0, 0, 1);
+    Quaternion<float> m_rotation = Quaternion<float>(0, 0, 0, 1);
 
-    BoundBox m_aabb;
     bool m_isSelected;
 
     RefCntAutoPtr<IRenderDevice> m_device;
 
-    eastl::string m_path;
+    eastl::string m_basePath;
+    eastl::string m_name;
+    eastl::string m_flatbufferPath; // todo: make sure we need this
 
     eastl::vector<Group> m_meshes;
 
@@ -155,6 +163,8 @@ private:
     void recursivelyLoadNode(aiNode *pNode, const aiScene *pScene);
 
     Group loadGroupFrom(const aiMesh& mesh, const aiScene *pScene);
+
+    void LoadFromPath(const char *_path);
 };
 
 

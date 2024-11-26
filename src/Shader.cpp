@@ -13,10 +13,10 @@ Shader::Shader(const char* _path, PIPELINE_TYPE _type, eastl::vector<eastl::pair
     m_info.SourceLanguage = SHADER_SOURCE_LANGUAGE_HLSL;
     m_info.ShaderCompiler = Diligent::SHADER_COMPILER_DXC;
     m_info.CompileFlags = SHADER_COMPILE_FLAG_ENABLE_UNBOUNDED_ARRAYS;
-    m_info.HLSLVersion = ShaderVersion{ 6, 5 };
     m_info.Desc.UseCombinedTextureSamplers = true;
+    m_info.HLSLVersion = ShaderVersion{ 6, 6 };
 
-    m_macroHelper.AddShaderMacro("USE_PACKED_VERTEX", Engine::instance->AreVerticesPacked() ? "1" : "0");
+    m_macroHelper.AddShaderMacro("USE_PACKED_VERTEX", Engine::instance->areVerticesPacked() ? "1" : "0");
     m_macroHelper.AddShaderMacro("HEAP_MAX_TEXTURES", Engine::HEAP_MAX_TEXTURES);
     m_macroHelper.AddShaderMacro("HEAP_MAX_BUFFERS", Engine::HEAP_MAX_BUFFERS);
     for (const auto& macro: m_macros)
@@ -32,7 +32,7 @@ bool Shader::reload()
 {
     auto& device = Engine::instance->getDevice();
 
-    bool hasNotSameHash = true;
+    int hasNotSameHash = 0;
 
     if(m_type == Diligent::PIPELINE_TYPE_GRAPHICS)
     {
@@ -72,7 +72,7 @@ bool Shader::reload()
             else
             {
                 //std::cout << "Hashes are equal for " << path << std::endl;
-                hasNotSameHash = false;
+                hasNotSameHash++;
             }
         }
         else
@@ -114,7 +114,7 @@ bool Shader::reload()
             else
             {
                 //std::cout << "Hashes are equal for " << path << std::endl;
-                hasNotSameHash = false;
+                hasNotSameHash++;
             }
         }
         else
@@ -153,15 +153,21 @@ bool Shader::reload()
                     m_info.Source = buffer.c_str();
                     m_info.SourceLength = buffer.size();
 
-                    device->CreateShader(m_info, &pCS);
+                    auto* output = new IDataBlob *;
+
+                    device->CreateShader(m_info, &pCS, output);
                     std::cout << "Compiled " << path << " successfully" << std::endl;
+                    const char* first = reinterpret_cast<const char *>(output[0]->GetConstDataPtr());
+                    std::cout << "Logs " << first << std::endl;
+
+                    delete output;
                     m_shaders[0] = pCS;
                 }
             }
             else
             {
                 //std::cout << "Hashes are equal for " << path << std::endl;
-                hasNotSameHash = false;
+                hasNotSameHash++;
             }
         }
         else
@@ -170,7 +176,7 @@ bool Shader::reload()
         }
     }
 
-    return hasNotSameHash;
+    return hasNotSameHash > 0;
 }
 
 RefCntAutoPtr<IShader> Shader::getShaderStage(const EShaderStage _stage) const

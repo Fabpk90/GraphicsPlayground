@@ -57,6 +57,9 @@ public:
                         bool              IsGL);
     void SetSpeedUpScales(Float32 SpeedUpScale, Float32 SuperSpeedUpScale);
 
+    void AddSpeedUpScale();
+    void DecreaseSpeedUpScale();
+
 
     // clang-format off
     const float4x4& GetViewMatrix()  const { return m_ViewMatrix;  }
@@ -89,13 +92,11 @@ public:
         m_fHandness = IsRightHanded ? +1.f : -1.f;
     }
 
-    eastl::array<float4x4, 3> getSliceViewProjMatrix(float3 lightDir);
+    eastl::array<float4x4, 3> getSliceViewProjMatrix(const float3& lightDir);
 
-    eastl::array<float4, 8> getFrustrumCornersWS(float4x4& projMatrix)
+    static eastl::array<float3, 8> getFrustrumCornersWS(const float4x4& cameraInvProjViewMatrix)
     {
-        // we're using the same view matrix because we have *slices/ of the camera
-        const auto invProjView = (m_ViewMatrix * projMatrix).Transpose().Inverse();
-        eastl::array<float4, 8> frustrumCorners;
+        eastl::array<float3, 8> frustrumCorners;
 
         for (uint x = 0; x < 2; ++x)
         {
@@ -104,24 +105,36 @@ public:
                 for (uint z = 0; z < 2; ++z)
                 {
                     // NDC[-1; 1] to WS
-                    const float4 point = invProjView * float4(
+                    // But only Gl has -1 for Z, dx 12 and VK have [0;1]
+                    const float4 point =  float4(
                             2.0f * x - 1.0f,
                             2.0f * y - 1.0f,
-                            2.0f * z - 1.0f,
-                            1.0f);
-                    frustrumCorners[(x * 2 * 2) + (y * 2) + z] = point / point.w;
+                            z,
+                            1.0f) * cameraInvProjViewMatrix;
+                    frustrumCorners[z + y * 2 + x * 2 * 2] = (point / point.w);
                 }
             }
         }
+
         return frustrumCorners;
     }
 
-    [[nodiscard]] static constexpr uint getNbCascade() { return m_slicesNearFarShadow.size();}
-    static eastl::array<float, 3> getCascadeFarPlane() { return m_slicesNearFarShadow; }
-    inline static eastl::array<float, 3> m_slicesNearFarShadow;
+    [[nodiscard]] static constexpr uint getNbCascade() { return m_slicesFarShadow.size();}
+    static eastl::array<float, 3> getCascadeFarPlane()
+    {
+        eastl::array<float, 3> cascades{};
+
+        for (int i = 0; i < cascades.size(); ++i)
+        {
+            //todo fsantoro fix this ! (static and hardcoded value)
+            cascades[i] = m_slicesFarShadow[i] / 1000.0f;
+        }
+        return cascades;
+    }
+    inline static eastl::array<float, 3> m_slicesFarShadow;
 protected:
 
-    [[nodiscard]] float4x4 GetReferenceRotiation() const;
+    [[nodiscard]] float4x4 GetReferenceRotation() const;
 
     ProjectionAttribs m_ProjAttribs;
 
@@ -139,6 +152,9 @@ protected:
     float    m_fRotationSpeed = 0.01f;
     float    m_fMoveSpeed     = 1.f;
     float    m_fCurrentSpeed  = 0.f;
+
+    // This is for debug, 0 means fps, others mean directional camera
+    int m_cameraIndex = 0;
 
     float m_fYawAngle          = 0; // Yaw angle of camera
     float m_fPitchAngle        = 0; // Pitch angle of camera

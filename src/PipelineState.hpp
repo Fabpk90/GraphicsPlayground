@@ -25,10 +25,11 @@ public:
         eastl::string m_name;
         IDeviceObject* m_object;
     };
-//todo: refacto this, make this a builder class maybe ?
-    PipelineState(RefCntAutoPtr<IRenderDevice> _device, const char* _name, PIPELINE_TYPE _type, const char* _shaderPath, eastl::vector<eastl::pair<eastl::string, eastl::string>> _macros = {},
+//todo: @fsantoro refacto this, make this a builder class maybe ?
+    //TODO @fsantoros make this a templated class maybe ? Or have two different ctors
+    PipelineState(const RefCntAutoPtr<IRenderDevice>& _device, const char* _name, PIPELINE_TYPE _type, const char* _shaderPath, const eastl::vector<eastl::pair<eastl::string, eastl::string>>&_macros = {},
                   eastl::vector<VarStruct> _staticVars = {}, eastl::vector<VarStruct> _dynamicVars = {}
-                  , GraphicsPipelineDesc _graphicsDesc = {}, eastl::vector<LayoutElement> _layoutElements = {});
+                  , const GraphicsPipelineDesc&_graphicsDesc = {}, eastl::vector<LayoutElement> _layoutElements = {});
 
     ~PipelineState();
 
